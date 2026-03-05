@@ -1,5 +1,11 @@
 package main
 
+import (
+	"os/user"
+	"path/filepath"
+	"strings"
+)
+
 type Config struct {
 	OllamaURL  string
 	Model      string
@@ -12,4 +18,26 @@ func DefaultConfig() *Config {
 		Model:      "llama2",
 		AllowedDir: "~/liberida-workspace",
 	}
+}
+
+func getHomeDir() string {
+	usr, err := user.Current()
+	if err != nil {
+		return "."
+	}
+	return usr.HomeDir
+}
+
+func ExpandPath(path string) string {
+	if !strings.HasPrefix(path, "~") {
+		return path
+	}
+
+	home := getHomeDir()
+
+	if path == "~" {
+		return home
+	}
+
+	return filepath.Join(home, path[2:])
 }
