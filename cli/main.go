@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mnemolet/liberida/internal/config"
+	"github.com/mnemolet/liberida/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +29,19 @@ func main() {
 		Use:   "configure",
 		Short: "Configure LiberIda",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Setup wizard will go here")
+			p := tea.NewProgram(tui.InitialModel())
+
+			finalModel, err := p.Run()
+			if err != nil {
+				return fmt.Errorf("TUI error: %w", err)
+			}
+
+			if m, ok := finalModel.(tui.Model); ok && m.Completed() {
+				fmt.Println("Setup completed successfully!")
+			} else {
+				fmt.Println("Setup cancelled.")
+			}
+
 			return nil
 		},
 	}

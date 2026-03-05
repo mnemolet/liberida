@@ -45,3 +45,7 @@ func (m Model) View() string {
 	}
 	return s
 }
+
+func (m Model) Completed() bool {
+	return m.completed
+}
