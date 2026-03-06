@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,11 +24,14 @@ var (
 )
 
 type Model struct {
-	choices   []string
-	cursor    int
-	question  string
-	step      int
-	completed bool
+	choices    []string
+	cursor     int
+	question   string
+	step       int
+	completed  bool
+	ollamaURL  string
+	model      string
+	allowedDir string
 }
 
 func InitialModel() Model {
@@ -34,6 +39,8 @@ func InitialModel() Model {
 		step:      0,
 		cursor:    0,
 		completed: false,
+		ollamaURL: defaultOllamaURL,
+		model:     defaultModel,
 	}
 }
 
@@ -75,6 +82,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.step = 2
 					m.cursor = 0
 				}
+			case 2:
+				models := []string{"llama2", "mistral", "codellama"}
+				m.model = models[m.cursor]
+				m.step = 3
+				m.cursor = 0
+				m.question = "Execution Mode:"
+				m.choices = []string{"Local directory", "Docker container", "Podman container"}
+			case 3:
+				m.step = 4
+				m.cursor = 0
+				m.question = "Workspace Directory:"
+				// Get home directory for default
+				home, _ := os.UserHomeDir()
+				defaultDir := filepath.Join(home, defaultWorkspace)
+				m.choices = []string{fmt.Sprintf("Use default (%s)", defaultDir), "Enter custom path"}
+			case 4:
+				home, _ := os.UserHomeDir()
+				if m.cursor == 0 {
+					m.allowedDir = filepath.Join(home, defaultWorkspace)
+				} else {
+					m.allowedDir = filepath.Join(home, defaultWorkspace) // Default for now
+				}
+				m.completed = true
+				// Here we would save the config
+				// For now, just complete
 			}
 		}
 	}
