@@ -1,7 +1,24 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
+)
+
+const (
+	// Default values
+	defaultOllamaURL = "http://localhost:11434"
+	defaultModel     = "llama2"
+	defaultWorkspace = "liberida-workspace"
+)
+
+var (
+	urlChoices = []string{
+		fmt.Sprintf("Use default (%s)", defaultOllamaURL),
+		"Enter custom URL",
+	}
 )
 
 type Model struct {
@@ -30,20 +47,74 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+
+		case "down", "j":
+			if m.cursor < len(m.choices)-1 {
+				m.cursor++
+			}
+
+		case "enter", " ":
+			switch m.step {
+			case 0: // Welcome screen
+				m.step = 1
+				m.question = "Ollama URL:"
+				m.choices = urlChoices
+			case 1:
+				if m.cursor == 0 {
+					m.ollamaURL = defaultOllamaURL
+					m.step = 2
+					m.cursor = 0
+					m.question = "Select Model:"
+					m.choices = []string{"llama2", "mistral", "codellama"}
+				} else {
+					m.step = 2
+					m.cursor = 0
+				}
+			}
 		}
 	}
 	return m, nil
 }
 
 func (m Model) View() string {
-	s := "\n LiberIda Setup Wizard\n\n"
+	var s strings.Builder
+
+	// Header
+	s.WriteString("LiberIda Setup Wizard\n")
 
 	if m.completed {
-		s += "Setup complete! Press q to exit.\n"
-	} else {
-		s += "Press q to quit\n"
+		s.WriteString("Setup complete!\n")
+		s.WriteString("\nConfiguration saved to ~/.liberida/config.toml\n")
+		s.WriteString("\nPress q to exit.\n")
+		return s.String()
 	}
-	return s
+
+	// Show current step
+	s.WriteString(fmt.Sprintf("Step %d/5\n\n", m.step+1))
+
+	// Show current question
+	if m.question != "" {
+		s.WriteString(m.question + "\n\n")
+	}
+
+	// Show choices
+	for i, choice := range m.choices {
+		cursor := "  "
+		if m.cursor == i {
+			cursor = "> "
+		}
+		s.WriteString(fmt.Sprintf("%s%s\n", cursor, choice))
+	}
+
+	// Footer
+	s.WriteString("\n(up/down to move, Enter to select, q to quit)\n")
+
+	return s.String()
 }
 
 func (m Model) Completed() bool {
