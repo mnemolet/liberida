@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -53,8 +54,10 @@ func (m *Manager) Load() error {
 
 	// Try to read existing config file
 	if err := m.viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileAlreadyExistsError); ok {
-			return nil
+		// Use errors.As to handle wrapped errors
+		var configNotFoundError viper.ConfigFileNotFoundError
+		if errors.As(err, &configNotFoundError) {
+			return nil // Config file not found is not an error
 		}
 		return err
 	}
@@ -118,5 +121,9 @@ func (m *Manager) Exists() bool {
 // Delete removes the config file from disk
 func (m *Manager) Delete() error {
 	configFile := filepath.Join(m.configPath, "config.toml")
-	return os.Remove(configFile)
+	err := os.Remove(configFile)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
