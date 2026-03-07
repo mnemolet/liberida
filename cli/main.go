@@ -58,7 +58,9 @@ func main() {
 
 			fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
 			fmt.Printf("Model: %s\n", cfg.Model)
+			fmt.Printf("Execution mode: %s\n", cfg.ExecutionMode)
 			fmt.Printf("Allowed Dir: %s\n", cfg.AllowedDir)
+			fmt.Printf("Context size: %v\n", cfg.ContextSize)
 			return nil
 		},
 	}
@@ -67,7 +69,7 @@ func main() {
 	rootCmd.AddCommand(showConfigCmd)
 
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

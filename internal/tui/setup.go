@@ -190,7 +190,13 @@ func (m *Model) saveConfig() {
 	cfg.OllamaURL = m.ollamaURL
 	cfg.Model = m.model
 	cfg.ExecutionMode = config.ExecutionMode(m.execMode)
-	cfg.AllowedDir = m.allowedDir
+
+	// Only set AllowedDir if not in chat-only mode
+	if m.execMode == string(config.ModeChatOnly) {
+		cfg.AllowedDir = "" // Clear any existing directory for chat-only mode
+	} else {
+		cfg.AllowedDir = m.allowedDir
+	}
 
 	if err := m.configMgr.Save(); err != nil {
 		// In a TUI, we can't easily show errors, so we'll log to file
