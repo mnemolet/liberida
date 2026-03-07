@@ -29,7 +29,8 @@ func main() {
 		Use:   "configure",
 		Short: "Configure LiberIda",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			p := tea.NewProgram(tui.InitialModel())
+			manager := config.NewManager()
+			p := tea.NewProgram(tui.InitialModel(manager))
 
 			finalModel, err := p.Run()
 			if err != nil {
@@ -38,6 +39,7 @@ func main() {
 
 			if m, ok := finalModel.(tui.Model); ok && m.Completed() {
 				fmt.Println("Setup completed successfully!")
+				fmt.Printf("Configuration saved to: %s\n", manager.GetConfigPath())
 			} else {
 				fmt.Println("Setup cancelled.")
 			}
