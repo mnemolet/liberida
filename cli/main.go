@@ -20,6 +20,7 @@ func main() {
 			cfg := manager.Get()
 
 			fmt.Println("LiberIda is ready!")
+			fmt.Printf("Provider: %s\n", cfg.Provider)
 			fmt.Printf("Using model: %s\n", cfg.Model)
 			fmt.Printf("Working dir: %s\n", cfg.AllowedDir)
 		},
@@ -56,6 +57,7 @@ func main() {
 			manager.Load()
 			cfg := manager.Get()
 
+			fmt.Printf("Provider: %s\n", cfg.Provider)
 			fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
 			fmt.Printf("Model: %s\n", cfg.Model)
 			fmt.Printf("Execution mode: %s\n", cfg.ExecutionMode)

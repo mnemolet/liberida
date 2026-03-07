@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +17,7 @@ const (
 	defaultWorkspace = "liberida-workspace"
 
 	stepWelcome = iota
+	stepProvider
 	stepOllamaURL
 	stepModel
 	stepExecMode
@@ -43,6 +43,12 @@ var (
 		"Podman container",
 	}
 
+	// Provider choices
+	providerChoices = []string{
+		"Ollama (local)",
+		// Future providers can be added here
+	}
+
 	// Welcome screen choices
 	welcomeChoices = []string{
 		"Start setup",
@@ -56,6 +62,7 @@ type Model struct {
 	question   string
 	step       int
 	completed  bool
+	provider   string
 	ollamaURL  string
 	model      string
 	execMode   string
@@ -72,6 +79,7 @@ func InitialModel(cm *config.Manager) Model {
 		step:       stepWelcome,
 		cursor:     0,
 		completed:  false,
+		provider:   existing.Provider,
 		ollamaURL:  existing.OllamaURL,
 		model:      existing.Model,
 		execMode:   string(existing.ExecutionMode),
@@ -107,15 +115,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.step {
 			case stepWelcome: // Welcome screen
 				if m.cursor == 0 { // Start setup
-					log.Println("Starting setup...")
-					m.step = stepOllamaURL
+					m.step = stepProvider
 					m.cursor = 0
-					m.question = "Ollama URL:"
-					m.choices = urlChoices
+					m.question = "Select AI Provider:"
+					m.choices = providerChoices
 				} else if m.cursor == 1 { // Exit
-					log.Println("Exiting...")
 					return m, tea.Quit
 				}
+			case stepProvider:
+				m.provider = "ollama"
+				m.step = stepOllamaURL
+				m.cursor = 0
+				m.question = "Ollama URL:"
+				m.choices = urlChoices
 			case stepOllamaURL:
 				if m.cursor == 0 {
 					m.ollamaURL = defaultOllamaURL
@@ -166,17 +178,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.allowedDir = filepath.Join(home, defaultWorkspace) // Default for now
 				}
 
-				// Save the configuration
-				cfg := m.configMgr.Get()
-				cfg.OllamaURL = m.ollamaURL
-				cfg.Model = m.model
-				cfg.AllowedDir = m.allowedDir
-
-				if err := m.configMgr.Save(); err != nil {
-					// We can't show error nicely in TUI, but we'll log it
-					fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
-				}
-
+				m.saveConfig()
+				m.step = stepComplete
 				m.completed = true
 			}
 		}
@@ -187,6 +190,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // saveConfig persists the configuration to disk
 func (m *Model) saveConfig() {
 	cfg := m.configMgr.Get()
+	cfg.Provider = m.provider
 	cfg.OllamaURL = m.ollamaURL
 	cfg.Model = m.model
 	cfg.ExecutionMode = config.ExecutionMode(m.execMode)
@@ -244,6 +248,7 @@ func (m Model) renderComplete() string {
 	s.WriteString("Setup complete!\n")
 	s.WriteString("\nConfig saved to ~/.liberida/config.toml\n")
 	s.WriteString("\nConfiguration:\n")
+	s.WriteString(fmt.Sprintf("- Provider: %s\n", m.provider))
 	s.WriteString(fmt.Sprintf("- Ollama URL: %s\n", m.ollamaURL))
 	s.WriteString(fmt.Sprintf("- Model: %s\n", m.model))
 	s.WriteString(fmt.Sprintf("- Execution mode: %s\n", m.execMode))
