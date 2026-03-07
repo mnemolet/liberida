@@ -17,12 +17,13 @@ type Manager struct {
 	configPath string
 	config     *Config
 	viper      *viper.Viper
+	homeProv   HomeDirProvider
 }
 
-func NewManager() *Manager {
-	home := getHomeDir()
+func NewManagerWithProvider(hp HomeDirProvider) *Manager {
+	home := hp.GetHomeDir()
 	configPath := filepath.Join(home, ".liberida")
-	os.MkdirAll(configPath, 755)
+	os.MkdirAll(configPath, 0755)
 
 	v := viper.New()
 	v.SetConfigName(defaultConfigName)
@@ -31,9 +32,15 @@ func NewManager() *Manager {
 
 	return &Manager{
 		configPath: configPath,
-		config:     DefaultConfig(),
+		config:     DefaultConfig(hp),
 		viper:      v,
+		homeProv:   hp,
 	}
+}
+
+// NewManager creates a new configuration manager using the OS home directory.
+func NewManager() *Manager {
+	return NewManagerWithProvider(OSHomeDirProvider{})
 }
 
 func (m *Manager) Load() error {
@@ -98,7 +105,7 @@ func (m *Manager) UpdateFromMap(updates map[string]interface{}) error {
 
 // Reset restores the configuration to defaults
 func (m *Manager) Reset() {
-	m.config = DefaultConfig()
+	m.config = DefaultConfig(m.homeProv)
 }
 
 // Exists checks if a config file exists on disk

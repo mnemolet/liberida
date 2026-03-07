@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os/user"
 	"path/filepath"
 	"strings"
 )
@@ -25,9 +24,9 @@ type Config struct {
 	ContextSize   int           `mapstructure:"context_size"`
 }
 
-func DefaultConfig() *Config {
-	home := getHomeDir()
-	defaultWorkspace := filepath.Join(home, "ai-agent-workspace")
+func DefaultConfig(hp HomeDirProvider) *Config {
+	home := hp.GetHomeDir()
+	defaultWorkspace := filepath.Join(home, "liberida-workspace")
 
 	return &Config{
 		OllamaURL:     "http://localhost:11434",
@@ -39,20 +38,12 @@ func DefaultConfig() *Config {
 	}
 }
 
-func getHomeDir() string {
-	usr, err := user.Current()
-	if err != nil {
-		return "."
-	}
-	return usr.HomeDir
-}
-
-func ExpandPath(path string) string {
+func ExpandPath(path string, hp HomeDirProvider) string {
 	if !strings.HasPrefix(path, "~") {
 		return path
 	}
 
-	home := getHomeDir()
+	home := hp.GetHomeDir()
 
 	if path == "~" {
 		return home
