@@ -37,6 +37,7 @@ var (
 	}
 
 	modeChoices = []string{
+		"Chat only (no file access)",
 		"Local directory (restricted access)",
 		"Docker container",
 		"Podman container",
@@ -131,23 +132,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.step = stepExecMode
 				m.cursor = 0
 				m.question = "Execution Mode:"
-				m.choices = modelChoices
+				m.choices = modeChoices
 			case stepExecMode:
 				modes := []string{
+					string(config.ModeChatOnly),
 					string(config.ModeLocal),
 					string(config.ModeDocker),
 					string(config.ModePodman),
 				}
 				m.execMode = modes[m.cursor]
-				m.step = stepDirectory
-				m.cursor = 0
-				m.question = "Workspace Directory:"
-				// Get home directory for default
-				home, _ := os.UserHomeDir()
-				defaultDir := filepath.Join(home, defaultWorkspace)
-				m.choices = []string{
-					fmt.Sprintf("Use default (%s)", defaultDir),
-					"Enter custom path",
+
+				if m.execMode == string(config.ModeChatOnly) {
+					m.saveConfig()
+					m.step = stepComplete
+					m.completed = true
+				} else {
+					m.step = stepDirectory
+					m.cursor = 0
+					m.question = "Workspace Directory:"
+					// Get home directory for default
+					home, _ := os.UserHomeDir()
+					defaultDir := filepath.Join(home, defaultWorkspace)
+					m.choices = []string{
+						fmt.Sprintf("Use default (%s)", defaultDir),
+						"Enter custom path",
+					}
 				}
 			case stepDirectory:
 				home, _ := os.UserHomeDir()
@@ -173,6 +182,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// saveConfig persists the configuration to disk
+func (m *Model) saveConfig() {
+	cfg := m.configMgr.Get()
+	cfg.OllamaURL = m.ollamaURL
+	cfg.Model = m.model
+	cfg.ExecutionMode = config.ExecutionMode(m.execMode)
+	cfg.AllowedDir = m.allowedDir
+
+	if err := m.configMgr.Save(); err != nil {
+		// In a TUI, we can't easily show errors, so we'll log to file
+		fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
+	}
 }
 
 func (m Model) View() string {
@@ -218,7 +241,13 @@ func (m Model) renderComplete() string {
 	s.WriteString(fmt.Sprintf("- Ollama URL: %s\n", m.ollamaURL))
 	s.WriteString(fmt.Sprintf("- Model: %s\n", m.model))
 	s.WriteString(fmt.Sprintf("- Execution mode: %s\n", m.execMode))
-	s.WriteString(fmt.Sprintf("- Workspace: %s\n", m.allowedDir))
+
+	if m.execMode != string(config.ModeChatOnly) {
+		s.WriteString(fmt.Sprintf("- Workspace: %s\n", m.allowedDir))
+	} else {
+		s.WriteString("- Workspace: None (chat only)\n")
+	}
+
 	s.WriteString("\nPress q to exit.\n")
 	return s.String()
 }

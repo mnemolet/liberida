@@ -80,3 +80,36 @@ func (m *Manager) Get() *Config {
 func (m *Manager) GetConfigPath() string {
 	return filepath.Join(m.configPath, defaultConfig)
 }
+
+// UpdateFromMap updates the config with values from a map
+// Useful for TUI or CLI flag updates
+func (m *Manager) UpdateFromMap(updates map[string]interface{}) error {
+	for key, value := range updates {
+		m.viper.Set(key, value)
+	}
+
+	// Apply updates to config struct
+	if err := m.viper.Unmarshal(m.config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Reset restores the configuration to defaults
+func (m *Manager) Reset() {
+	m.config = DefaultConfig()
+}
+
+// Exists checks if a config file exists on disk
+func (m *Manager) Exists() bool {
+	configFile := filepath.Join(m.configPath, "config.toml")
+	_, err := os.Stat(configFile)
+	return err == nil
+}
+
+// Delete removes the config file from disk
+func (m *Manager) Delete() error {
+	configFile := filepath.Join(m.configPath, "config.toml")
+	return os.Remove(configFile)
+}
