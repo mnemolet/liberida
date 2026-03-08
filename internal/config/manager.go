@@ -45,6 +45,7 @@ func NewManager() *Manager {
 }
 
 func (m *Manager) Load() error {
+	m.viper.SetDefault("provider", m.config.Provider)
 	m.viper.SetDefault("ollama_url", m.config.OllamaURL)
 	m.viper.SetDefault("model", m.config.Model)
 	m.viper.SetDefault("execution_mode", string(m.config.ExecutionMode))
@@ -72,6 +73,7 @@ func (m *Manager) Load() error {
 
 func (m *Manager) Save() error {
 	// Set all values in viper
+	m.viper.Set("provider", m.config.Provider)
 	m.viper.Set("ollama_url", m.config.OllamaURL)
 	m.viper.Set("model", m.config.Model)
 	m.viper.Set("execution_mode", string(m.config.ExecutionMode))

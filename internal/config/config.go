@@ -16,6 +16,7 @@ const (
 )
 
 type Config struct {
+	Provider      string        `mapstructure:"provider"`
 	OllamaURL     string        `mapstructure:"ollama_url"`
 	Model         string        `mapstructure:"model"`
 	ExecutionMode ExecutionMode `mapstructure:"execution_mode"`
@@ -29,6 +30,7 @@ func DefaultConfig(hp HomeDirProvider) *Config {
 	defaultWorkspace := filepath.Join(home, "liberida-workspace")
 
 	return &Config{
+		Provider:      "ollama",
 		OllamaURL:     "http://localhost:11434",
 		Model:         "llama2",
 		ExecutionMode: ModeChatOnly,
@@ -53,8 +55,12 @@ func ExpandPath(path string, hp HomeDirProvider) string {
 }
 
 func (c *Config) Validate() error {
-	if c.OllamaURL == "" {
-		return fmt.Errorf("ollama URL is required")
+	if c.Provider == "" {
+		return fmt.Errorf("provider is required")
+	}
+
+	if c.OllamaURL == "" && c.Provider == "ollama" {
+		return fmt.Errorf("ollama URL is required for ollama provider")
 	}
 	if c.Model == "" {
 		return fmt.Errorf("model is required")
@@ -89,11 +95,13 @@ func (c *Config) String() string {
 	}
 
 	return fmt.Sprintf(`Configuration:
+  Provider: %s
   Ollama URL: %s
   Model: %s
   Execution Mode: %s
   Context Size: %d
   File Operations: %v`,
+		c.Provider,
 		c.OllamaURL,
 		c.Model,
 		modeStr,
