@@ -36,3 +36,6 @@ go.work.sum
 
 # log files
 .log
+
+# custom
+test-ollama/
