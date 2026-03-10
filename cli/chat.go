@@ -154,8 +154,19 @@ Only use relative paths. Do not use absolute paths. Do not include any other tex
 			actList, err := actions.Parse(fullResponse.String())
 			if err == nil && len(actList) > 0 {
 				fmt.Println()
+				fmt.Println("The AI requested the following file operations:")
 				for _, act := range actList {
-					executeAction(sb, act)
+					fmt.Printf("   • %s\n", act.String())
+				}
+				fmt.Print("Do you want to execute these? (y/n): ")
+				confirm, _ := reader.ReadString('\n')
+				confirm = strings.TrimSpace(strings.ToLower(confirm))
+				if confirm == "y" || confirm == "yes" {
+					for _, act := range actList {
+						executeAction(sb, act)
+					}
+				} else {
+					fmt.Println("Operations cancelled.")
 				}
 			}
 		}
