@@ -11,6 +11,7 @@ import (
 
 	"github.com/mnemolet/liberida/internal/actions"
 	"github.com/mnemolet/liberida/internal/config"
+	"github.com/mnemolet/liberida/internal/db"
 	"github.com/mnemolet/liberida/internal/provider"
 	"github.com/mnemolet/liberida/internal/sandbox"
 	"github.com/spf13/cobra"
@@ -21,6 +22,10 @@ var chatCmd = &cobra.Command{
 	Short: "Start an interactive chat session",
 	Long:  "Start an interactive chat session with the configured AI provider.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Get session ID from flag
+		sessionID, _ := cmd.Flags().GetUint("session")
+		newSession, _ := cmd.Flags().GetBool("new")
+
 		manager := config.NewManager()
 		if err := manager.Load(); err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
@@ -48,15 +53,17 @@ var chatCmd = &cobra.Command{
 		}
 
 		// Start chat session
-		return runChatSession(prov, cfg)
+		return runChatSession(prov, cfg, sessionID, newSession)
 	},
 }
 
 func init() {
+	chatCmd.Flags().Uint("session", 0, "Resume existing session by ID")
+	chatCmd.Flags().Bool("new", false, "Force create new session (ignore --session)")
 	rootCmd.AddCommand(chatCmd)
 }
 
-func runChatSession(prov provider.Provider, cfg *config.Config) error {
+func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, forceNew bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -67,10 +74,47 @@ func runChatSession(prov provider.Provider, cfg *config.Config) error {
 		fmt.Println("\n\nInterrupted. Exiting.")
 		cancel()
 	}()
-
 	fmt.Printf("Starting chat session with %s (model: %s)\n", prov.Name(), cfg.Model)
 	fmt.Println("Type '/exit' or '/quit' to end the session.")
 	fmt.Println("------------------------------------------------")
+
+	// Init DB
+	dbManager, err := db.NewManager(cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer dbManager.Close()
+
+	// Handle session
+	var currentSession *db.ChatSession
+	if forceNew || sessionID == 0 {
+		// Create new session
+		currentSession, err = dbManager.CreateSession("")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("New session created (ID: %d)\n", currentSession.ID)
+	} else {
+		// Load existing session
+		currentSession, err = dbManager.GetSession(sessionID)
+		if err != nil {
+			return fmt.Errorf("failed to load session %d: %w", sessionID, err)
+		}
+		fmt.Printf("Resumed session: %s (ID: %d)\n", currentSession.Title, currentSession.ID)
+
+		// Display previous messages
+		if len(currentSession.Messages) > 0 {
+			fmt.Println("\n--- Previous conversation ---")
+			for _, msg := range currentSession.Messages {
+				prefix := "User:"
+				if msg.Role == "assistant" {
+					prefix = "AI:"
+				}
+				fmt.Printf("%s: %s\n", prefix, truncateString(msg.Message, 60))
+			}
+			fmt.Println("--- Continuing ---")
+		}
+	}
 
 	// Create sandbox if file operations are allowed
 	var sb *sandbox.Sandbox
@@ -86,7 +130,9 @@ func runChatSession(prov provider.Provider, cfg *config.Config) error {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	var messages []provider.Message
+
+	// Build messages slice from history
+	messages := make([]provider.Message, 0)
 
 	// System message with mode-appropriate instructions
 	var systemMsg provider.Message
@@ -111,6 +157,16 @@ Only use relative paths. Do not use absolute paths. Do not include any other tex
 	}
 	messages = append(messages, systemMsg)
 
+	// Add historical messages
+	for _, msg := range currentSession.Messages {
+		messages = append(messages, provider.Message{
+			Role:    msg.Role,
+			Content: msg.Message,
+		})
+	}
+
+	titleGenerated := false
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -131,6 +187,22 @@ Only use relative paths. Do not use absolute paths. Do not include any other tex
 		}
 		if input == "" {
 			continue
+		}
+
+		// Save user message to database
+		_, err = dbManager.AddMessage(currentSession.ID, "user", input)
+		if err != nil {
+			fmt.Printf("Warning: failed to save message: %v\n", err)
+		}
+
+		// Generate title from first user message if not already set
+		if !titleGenerated && len(currentSession.Messages) == 0 {
+			newTitle := input
+			if len(newTitle) > 30 {
+				newTitle = newTitle[:27] + "..."
+			}
+			dbManager.UpdateSessionTitle(currentSession.ID, newTitle)
+			titleGenerated = true
 		}
 
 		messages = append(messages, provider.Message{Role: "user", Content: input})
@@ -154,6 +226,13 @@ Only use relative paths. Do not use absolute paths. Do not include any other tex
 			fullResponse.WriteString(chunk)
 		}
 		fmt.Println()
+
+		response := fullResponse.String()
+		// Save assistant message to database
+		_, err = dbManager.AddMessage(currentSession.ID, "assistant", response)
+		if err != nil {
+			fmt.Printf("Warning: failed to save message: %v\n", err)
+		}
 
 		messages = append(messages, provider.Message{Role: "assistant", Content: fullResponse.String()})
 
