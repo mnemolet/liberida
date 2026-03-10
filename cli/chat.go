@@ -88,14 +88,9 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 
 	// Handle session
 	var currentSession *db.ChatSession
-	if forceNew || sessionID == 0 {
-		// Create new session
-		currentSession, err = dbManager.CreateSession("")
-		if err != nil {
-			return err
-		}
-		fmt.Printf("New session created (ID: %d)\n", currentSession.ID)
-	} else {
+	var isNewSession bool
+
+	if sessionID != 0 && !forceNew {
 		// Load existing session
 		currentSession, err = dbManager.GetSession(sessionID)
 		if err != nil {
@@ -116,6 +111,10 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 			}
 			fmt.Println("--- Continuing ---")
 		}
+	} else {
+		// New session will be created on first message
+		isNewSession = true
+		fmt.Println("New session will be created when you send your first message.")
 	}
 
 	// Create sandbox if file operations are allowed
@@ -162,12 +161,14 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 	}
 	messages = append(messages, systemMsg)
 
-	// Add historical messages
-	for _, msg := range currentSession.Messages {
-		messages = append(messages, provider.Message{
-			Role:    msg.Role,
-			Content: msg.Message,
-		})
+	// Add historical messages only if we have an existing session
+	if !isNewSession && currentSession != nil {
+		for _, msg := range currentSession.Messages {
+			messages = append(messages, provider.Message{
+				Role:    msg.Role,
+				Content: msg.Message,
+			})
+		}
 	}
 
 	titleGenerated := false
@@ -192,6 +193,16 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 		}
 		if input == "" {
 			continue
+		}
+
+		// Create new session if needed
+		if isNewSession {
+			currentSession, err = dbManager.CreateSession("")
+			if err != nil {
+				return err
+			}
+			fmt.Printf("New session created (ID: %d)\n", currentSession.ID)
+			isNewSession = false
 		}
 
 		// Save user message to database
