@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -106,11 +107,12 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 		if len(currentSession.Messages) > 0 {
 			fmt.Println("\n--- Previous conversation ---")
 			for _, msg := range currentSession.Messages {
-				prefix := "User:"
-				if msg.Role == "assistant" {
-					prefix = "AI:"
+				if msg.Role == "user" {
+					fmt.Printf("You: %s\n", msg.Message)
+				} else {
+					cleanedMsg := cleanAIResponse(msg.Message)
+					fmt.Printf("AI: %s\n", cleanedMsg)
 				}
-				fmt.Printf("%s: %s\n", prefix, truncateString(msg.Message, 60))
 			}
 			fmt.Println("--- Continuing ---")
 		}
@@ -137,10 +139,11 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 	// System message with mode-appropriate instructions
 	var systemMsg provider.Message
 	if sb != nil {
-		// File operations allowed
 		systemMsg = provider.Message{
 			Role: "system",
 			Content: `You are an AI assistant that can perform file operations when requested.
+IMPORTANT: Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
+
 To perform a file operation, output a JSON object on its own line with the following format:
 {"type":"write","path":"filename.txt","content":"file content"}
 {"type":"read","path":"filename.txt"}
@@ -149,10 +152,12 @@ To perform a file operation, output a JSON object on its own line with the follo
 Only use relative paths. Do not use absolute paths. Do not include any other text with the JSON.`,
 		}
 	} else {
-		// Chat-only mode: no file operations
 		systemMsg = provider.Message{
-			Role:    "system",
-			Content: `You are an AI assistant in chat-only mode. You cannot create, read, modify, or delete files. Do not suggest file operations or pretend to execute them. Simply answer questions and chat with the user.`,
+			Role: "system",
+			Content: `You are an AI assistant in chat-only mode. 
+IMPORTANT: Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
+
+You cannot create, read, modify, or delete files. Do not suggest file operations or pretend to execute them. Simply answer questions and chat with the user.`,
 		}
 	}
 	messages = append(messages, systemMsg)
@@ -227,14 +232,18 @@ Only use relative paths. Do not use absolute paths. Do not include any other tex
 		}
 		fmt.Println()
 
-		response := fullResponse.String()
-		// Save assistant message to database
-		_, err = dbManager.AddMessage(currentSession.ID, "assistant", response)
+		// Clean the AI response
+		rawResponse := fullResponse.String()
+		cleanedResponse := cleanAIResponse(rawResponse)
+
+		// Save cleaned AI response to database
+		_, err = dbManager.AddMessage(currentSession.ID, "assistant", cleanedResponse)
 		if err != nil {
 			fmt.Printf("Warning: failed to save message: %v\n", err)
 		}
 
-		messages = append(messages, provider.Message{Role: "assistant", Content: fullResponse.String()})
+		// Add cleaned response to messages slice
+		messages = append(messages, provider.Message{Role: "assistant", Content: cleanedResponse})
 
 		// Execute any file operations requested in the response
 		if sb != nil {
@@ -243,7 +252,7 @@ Only use relative paths. Do not use absolute paths. Do not include any other tex
 				fmt.Println()
 				fmt.Println("The AI requested the following file operations:")
 				for _, act := range actList {
-					fmt.Printf("   • %s\n", act.String())
+					fmt.Printf("- %s\n", act.String())
 				}
 				fmt.Print("Do you want to execute these? (y/n): ")
 				confirm, _ := reader.ReadString('\n')
@@ -304,4 +313,24 @@ func getLastNMessages(messages []provider.Message, n int) []provider.Message {
 		return messages
 	}
 	return messages[len(messages)-n:]
+}
+
+// cleanAIResponse aggressively removes role prefixes from AI responses
+// Different models behave differently - this ensures consistent
+// output regardless of the underlying model's quirks.
+// It is idempotent - applying it multiple times is safe
+func cleanAIResponse(response string) string {
+	// Remove common role prefixes at the start of the string
+	re := regexp.MustCompile(`^(?i)(assistant|ai)\s*[:.-]?\s*`)
+	cleaned := re.ReplaceAllString(response, "")
+
+	// Remove any leading spaces or newlines
+	cleaned = strings.TrimSpace(cleaned)
+
+	// If the cleaned string is empty, return the original
+	if cleaned == "" {
+		return response
+	}
+
+	return cleaned
 }
