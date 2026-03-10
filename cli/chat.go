@@ -88,9 +88,11 @@ func runChatSession(prov provider.Provider, cfg *config.Config) error {
 	reader := bufio.NewReader(os.Stdin)
 	var messages []provider.Message
 
-	// System message with instructions for file operations if allowed
+	// System message with mode-appropriate instructions
+	var systemMsg provider.Message
 	if sb != nil {
-		systemMsg := provider.Message{
+		// File operations allowed
+		systemMsg = provider.Message{
 			Role: "system",
 			Content: `You are an AI assistant that can perform file operations when requested.
 To perform a file operation, output a JSON object on its own line with the following format:
@@ -100,8 +102,14 @@ To perform a file operation, output a JSON object on its own line with the follo
 {"type":"list"}  // lists all files in workspace
 Only use relative paths. Do not use absolute paths. Do not include any other text with the JSON.`,
 		}
-		messages = append(messages, systemMsg)
+	} else {
+		// Chat-only mode: no file operations
+		systemMsg = provider.Message{
+			Role:    "system",
+			Content: `You are an AI assistant in chat-only mode. You cannot create, read, modify, or delete files. Do not suggest file operations or pretend to execute them. Simply answer questions and chat with the user.`,
+		}
 	}
+	messages = append(messages, systemMsg)
 
 	for {
 		select {
