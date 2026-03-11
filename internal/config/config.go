@@ -23,11 +23,13 @@ type Config struct {
 	AllowedDir    string        `mapstructure:"allowed_dir"`
 	ContainerName string        `mapstructure:"container_name"`
 	ContextSize   int           `mapstructure:"context_size"`
+	DBPath        string        `mapstructure:"db_path"`
 }
 
 func DefaultConfig(hp HomeDirProvider) *Config {
 	home := hp.GetHomeDir()
 	defaultWorkspace := filepath.Join(home, "liberida-workspace")
+	defaultDBPath := filepath.Join(home, ".liberida", "chat.db")
 
 	return &Config{
 		Provider:      "ollama",
@@ -37,6 +39,7 @@ func DefaultConfig(hp HomeDirProvider) *Config {
 		AllowedDir:    defaultWorkspace,
 		ContainerName: "",
 		ContextSize:   10,
+		DBPath:        defaultDBPath,
 	}
 }
 

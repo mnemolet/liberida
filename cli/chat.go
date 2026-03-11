@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 
 	"github.com/mnemolet/liberida/internal/actions"
 	"github.com/mnemolet/liberida/internal/config"
+	"github.com/mnemolet/liberida/internal/db"
 	"github.com/mnemolet/liberida/internal/provider"
 	"github.com/mnemolet/liberida/internal/sandbox"
 	"github.com/spf13/cobra"
@@ -21,6 +23,10 @@ var chatCmd = &cobra.Command{
 	Short: "Start an interactive chat session",
 	Long:  "Start an interactive chat session with the configured AI provider.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Get session ID from flag
+		sessionID, _ := cmd.Flags().GetUint("session")
+		newSession, _ := cmd.Flags().GetBool("new")
+
 		manager := config.NewManager()
 		if err := manager.Load(); err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
@@ -48,15 +54,17 @@ var chatCmd = &cobra.Command{
 		}
 
 		// Start chat session
-		return runChatSession(prov, cfg)
+		return runChatSession(prov, cfg, sessionID, newSession)
 	},
 }
 
 func init() {
+	chatCmd.Flags().Uint("session", 0, "Resume existing session by ID")
+	chatCmd.Flags().Bool("new", false, "Force create new session (ignore --session)")
 	rootCmd.AddCommand(chatCmd)
 }
 
-func runChatSession(prov provider.Provider, cfg *config.Config) error {
+func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, forceNew bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -67,10 +75,47 @@ func runChatSession(prov provider.Provider, cfg *config.Config) error {
 		fmt.Println("\n\nInterrupted. Exiting.")
 		cancel()
 	}()
-
 	fmt.Printf("Starting chat session with %s (model: %s)\n", prov.Name(), cfg.Model)
 	fmt.Println("Type '/exit' or '/quit' to end the session.")
 	fmt.Println("------------------------------------------------")
+
+	// Init DB
+	dbManager, err := db.NewManager(cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer dbManager.Close()
+
+	// Handle session
+	var currentSession *db.ChatSession
+	var isNewSession bool
+
+	if sessionID != 0 && !forceNew {
+		// Load existing session
+		currentSession, err = dbManager.GetSession(sessionID)
+		if err != nil {
+			return fmt.Errorf("failed to load session %d: %w", sessionID, err)
+		}
+		fmt.Printf("Resumed session: %s (ID: %d)\n", currentSession.Title, currentSession.ID)
+
+		// Display previous messages
+		if len(currentSession.Messages) > 0 {
+			fmt.Println("\n--- Previous conversation ---")
+			for _, msg := range currentSession.Messages {
+				if msg.Role == "user" {
+					fmt.Printf("You: %s\n", msg.Message)
+				} else {
+					cleanedMsg := cleanAIResponse(msg.Message)
+					fmt.Printf("AI: %s\n", cleanedMsg)
+				}
+			}
+			fmt.Println("--- Continuing ---")
+		}
+	} else {
+		// New session will be created on first message
+		isNewSession = true
+		fmt.Println("New session will be created when you send your first message.")
+	}
 
 	// Create sandbox if file operations are allowed
 	var sb *sandbox.Sandbox
@@ -86,15 +131,18 @@ func runChatSession(prov provider.Provider, cfg *config.Config) error {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	var messages []provider.Message
+
+	// Build messages slice from history
+	messages := make([]provider.Message, 0)
 
 	// System message with mode-appropriate instructions
 	var systemMsg provider.Message
 	if sb != nil {
-		// File operations allowed
 		systemMsg = provider.Message{
 			Role: "system",
 			Content: `You are an AI assistant that can perform file operations when requested.
+IMPORTANT: Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
+
 To perform a file operation, output a JSON object on its own line with the following format:
 {"type":"write","path":"filename.txt","content":"file content"}
 {"type":"read","path":"filename.txt"}
@@ -103,13 +151,27 @@ To perform a file operation, output a JSON object on its own line with the follo
 Only use relative paths. Do not use absolute paths. Do not include any other text with the JSON.`,
 		}
 	} else {
-		// Chat-only mode: no file operations
 		systemMsg = provider.Message{
-			Role:    "system",
-			Content: `You are an AI assistant in chat-only mode. You cannot create, read, modify, or delete files. Do not suggest file operations or pretend to execute them. Simply answer questions and chat with the user.`,
+			Role: "system",
+			Content: `You are an AI assistant in chat-only mode. 
+IMPORTANT: Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
+
+You cannot create, read, modify, or delete files. Do not suggest file operations or pretend to execute them. Simply answer questions and chat with the user.`,
 		}
 	}
 	messages = append(messages, systemMsg)
+
+	// Add historical messages only if we have an existing session
+	if !isNewSession && currentSession != nil {
+		for _, msg := range currentSession.Messages {
+			messages = append(messages, provider.Message{
+				Role:    msg.Role,
+				Content: msg.Message,
+			})
+		}
+	}
+
+	titleGenerated := false
 
 	for {
 		select {
@@ -131,6 +193,32 @@ Only use relative paths. Do not use absolute paths. Do not include any other tex
 		}
 		if input == "" {
 			continue
+		}
+
+		// Create new session if needed
+		if isNewSession {
+			currentSession, err = dbManager.CreateSession("")
+			if err != nil {
+				return err
+			}
+			fmt.Printf("New session created (ID: %d)\n", currentSession.ID)
+			isNewSession = false
+		}
+
+		// Save user message to database
+		_, err = dbManager.AddMessage(currentSession.ID, "user", input)
+		if err != nil {
+			fmt.Printf("Warning: failed to save message: %v\n", err)
+		}
+
+		// Generate title from first user message if not already set
+		if !titleGenerated && len(currentSession.Messages) == 0 {
+			newTitle := input
+			if len(newTitle) > 30 {
+				newTitle = newTitle[:27] + "..."
+			}
+			dbManager.UpdateSessionTitle(currentSession.ID, newTitle)
+			titleGenerated = true
 		}
 
 		messages = append(messages, provider.Message{Role: "user", Content: input})
@@ -155,7 +243,18 @@ Only use relative paths. Do not use absolute paths. Do not include any other tex
 		}
 		fmt.Println()
 
-		messages = append(messages, provider.Message{Role: "assistant", Content: fullResponse.String()})
+		// Clean the AI response
+		rawResponse := fullResponse.String()
+		cleanedResponse := cleanAIResponse(rawResponse)
+
+		// Save cleaned AI response to database
+		_, err = dbManager.AddMessage(currentSession.ID, "assistant", cleanedResponse)
+		if err != nil {
+			fmt.Printf("Warning: failed to save message: %v\n", err)
+		}
+
+		// Add cleaned response to messages slice
+		messages = append(messages, provider.Message{Role: "assistant", Content: cleanedResponse})
 
 		// Execute any file operations requested in the response
 		if sb != nil {
@@ -164,7 +263,7 @@ Only use relative paths. Do not use absolute paths. Do not include any other tex
 				fmt.Println()
 				fmt.Println("The AI requested the following file operations:")
 				for _, act := range actList {
-					fmt.Printf("   • %s\n", act.String())
+					fmt.Printf("- %s\n", act.String())
 				}
 				fmt.Print("Do you want to execute these? (y/n): ")
 				confirm, _ := reader.ReadString('\n')
@@ -225,4 +324,24 @@ func getLastNMessages(messages []provider.Message, n int) []provider.Message {
 		return messages
 	}
 	return messages[len(messages)-n:]
+}
+
+// cleanAIResponse aggressively removes role prefixes from AI responses
+// Different models behave differently - this ensures consistent
+// output regardless of the underlying model's quirks.
+// It is idempotent - applying it multiple times is safe
+func cleanAIResponse(response string) string {
+	// Remove common role prefixes at the start of the string
+	re := regexp.MustCompile(`^(?i)(assistant|ai)\s*[:.-]?\s*`)
+	cleaned := re.ReplaceAllString(response, "")
+
+	// Remove any leading spaces or newlines
+	cleaned = strings.TrimSpace(cleaned)
+
+	// If the cleaned string is empty, return the original
+	if cleaned == "" {
+		return response
+	}
+
+	return cleaned
 }
