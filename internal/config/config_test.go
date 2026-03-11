@@ -96,6 +96,7 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "Valid chat-only config",
 			config: &Config{
+				Provider:      "ollama",
 				OllamaURL:     "http://localhost:11434",
 				Model:         "llama2",
 				ExecutionMode: ModeChatOnly,
@@ -106,6 +107,7 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "Valid local config with dir",
 			config: &Config{
+				Provider:      "ollama",
 				OllamaURL:     "http://localhost:11434",
 				Model:         "llama2",
 				ExecutionMode: ModeLocal,
@@ -116,6 +118,7 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "Invalid - missing Ollama URL",
 			config: &Config{
+				Provider:      "ollama",
 				OllamaURL:     "",
 				Model:         "llama2",
 				ExecutionMode: ModeChatOnly,
@@ -125,6 +128,7 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "Invalid - missing model",
 			config: &Config{
+				Provider:      "ollama",
 				OllamaURL:     "http://localhost:11434",
 				Model:         "",
 				ExecutionMode: ModeChatOnly,
@@ -134,6 +138,7 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "Invalid - local mode missing dir",
 			config: &Config{
+				Provider:      "ollama",
 				OllamaURL:     "http://localhost:11434",
 				Model:         "llama2",
 				ExecutionMode: ModeLocal,
@@ -144,9 +149,19 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "Invalid - unknown execution mode",
 			config: &Config{
+				Provider:      "ollama",
 				OllamaURL:     "http://localhost:11434",
 				Model:         "llama2",
 				ExecutionMode: "invalid",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid - missing provider",
+			config: &Config{
+				OllamaURL:     "http://localhost:11434",
+				Model:         "llama2",
+				ExecutionMode: ModeChatOnly,
 			},
 			wantErr: true,
 		},
