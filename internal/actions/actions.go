@@ -13,12 +13,14 @@ const (
 	TypeRead   Type = "read"
 	TypeDelete Type = "delete"
 	TypeList   Type = "list"
+	TypeExec   Type = "exec"
 )
 
 type Action struct {
-	Type    Type   `json:"type"`
-	Path    string `json:"path,omitempty"`
-	Content string `json:"content,omitempty"`
+	Type    Type     `json:"type"`
+	Path    string   `json:"path,omitempty"`
+	Content string   `json:"content,omitempty"`
+	Command []string `json:"command,omitempty"`
 }
 
 // Parse extracts actions from text by looking for JSON objects.
@@ -33,7 +35,7 @@ func Parse(text string) ([]Action, error) {
 			continue
 		}
 		switch act.Type {
-		case TypeWrite, TypeRead, TypeDelete, TypeList:
+		case TypeWrite, TypeRead, TypeDelete, TypeList, TypeExec:
 			actions = append(actions, act)
 		}
 	}
@@ -41,5 +43,18 @@ func Parse(text string) ([]Action, error) {
 }
 
 func (a Action) String() string {
-	return fmt.Sprintf("%s: %s", a.Type, a.Path)
+	switch a.Type {
+	case TypeWrite:
+		return fmt.Sprintf("write: %s", a.Path)
+	case TypeRead:
+		return fmt.Sprintf("read: %s", a.Path)
+	case TypeDelete:
+		return fmt.Sprintf("delete: %s", a.Path)
+	case TypeList:
+		return "list files"
+	case TypeExec:
+		return fmt.Sprintf("exec: %v", a.Command)
+	default:
+		return "unknown action"
+	}
 }
