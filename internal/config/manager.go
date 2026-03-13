@@ -50,8 +50,9 @@ func (m *Manager) Load() error {
 	m.viper.SetDefault("model", m.config.Model)
 	m.viper.SetDefault("execution_mode", string(m.config.ExecutionMode))
 	m.viper.SetDefault("allowed_dir", m.config.AllowedDir)
-	m.viper.SetDefault("container_name", m.config.ContainerName)
 	m.viper.SetDefault("context_size", m.config.ContextSize)
+	m.viper.SetDefault("container_name", m.config.ContainerName)
+	m.viper.SetDefault("container_image", m.config.ContainerImage)
 
 	// Try to read existing config file
 	if err := m.viper.ReadInConfig(); err != nil {
@@ -78,8 +79,9 @@ func (m *Manager) Save() error {
 	m.viper.Set("model", m.config.Model)
 	m.viper.Set("execution_mode", string(m.config.ExecutionMode))
 	m.viper.Set("allowed_dir", m.config.AllowedDir)
-	m.viper.Set("container_name", m.config.ContainerName)
 	m.viper.Set("context_size", m.config.ContextSize)
+	m.viper.Set("container_name", m.config.ContainerName)
+	m.viper.Set("container_image", m.config.ContainerImage)
 
 	configFile := filepath.Join(m.configPath, defaultConfig)
 	return m.viper.WriteConfigAs(configFile)
