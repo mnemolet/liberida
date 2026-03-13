@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -88,8 +89,20 @@ func (l *LocalExecutor) ListFiles() ([]string, error) {
 }
 
 func (l *LocalExecutor) RunCommand(ctx context.Context, command []string) (string, error) {
-	// TODO: implement command execution
-	return "", fmt.Errorf("RunCommand not implemented for local executor")
+	if len(command) == 0 {
+		return "", fmt.Errorf("empty command")
+	}
+
+	// Create the command
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.Dir = l.rootDir // Run in workspace directory
+
+	// Run and get output
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("command failed: %w", err)
+	}
+	return string(output), nil
 }
 
 func (l *LocalExecutor) Close() error {
