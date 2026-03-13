@@ -13,8 +13,8 @@ import (
 	"github.com/mnemolet/liberida/internal/actions"
 	"github.com/mnemolet/liberida/internal/config"
 	"github.com/mnemolet/liberida/internal/db"
+	"github.com/mnemolet/liberida/internal/executor"
 	"github.com/mnemolet/liberida/internal/provider"
-	"github.com/mnemolet/liberida/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -117,15 +117,34 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 		fmt.Println("New session will be created when you send your first message.")
 	}
 
-	// Create sandbox if file operations are allowed
-	var sb *sandbox.Sandbox
+	// Create executor based on execution mode
+	var exec executor.Executor
 	if cfg.IsFileOperationAllowed() {
-		var err error
-		sb, err = sandbox.New(cfg.AllowedDir)
-		if err != nil {
-			return fmt.Errorf("failed to initialize sandbox: %w", err)
+		switch cfg.ExecutionMode {
+		case config.ModeLocal:
+			exec, err = executor.NewLocal(cfg.AllowedDir)
+			if err != nil {
+				return fmt.Errorf("failed to initialize local executor: %w", err)
+			}
+			fmt.Printf("File operations allowed in: %s\n", cfg.AllowedDir)
+
+		case config.ModePodman:
+			exec, err = executor.NewPodman(cfg.ContainerName, cfg.ContainerImage, cfg.AllowedDir)
+			if err != nil {
+				return fmt.Errorf("failed to initialize Podman executor: %w", err)
+			}
+			fmt.Printf("Podman container '%s' ready with image %s\n", cfg.ContainerName, cfg.ContainerImage)
+			fmt.Printf("Workspace mounted at: %s\n", cfg.AllowedDir)
+
+		case config.ModeDocker:
+			// For Docker, we'll use the same Podman executor with Docker socket
+			// For now, return error until Docker executor is implemented
+			return fmt.Errorf("Docker mode not yet implemented, please use Podman")
+
+		default:
+			return fmt.Errorf("unsupported execution mode: %s", cfg.ExecutionMode)
 		}
-		fmt.Printf("File operations allowed in: %s\n", cfg.AllowedDir)
+		defer exec.Close()
 	} else {
 		fmt.Println("File operations are disabled (chat-only mode).")
 	}
@@ -137,10 +156,20 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 
 	// System message with mode-appropriate instructions
 	var systemMsg provider.Message
-	if sb != nil {
+	if exec != nil {
+		// Check if executor supports command execution (for exec action)
+		supportsExec := cfg.ExecutionMode == config.ModePodman || cfg.ExecutionMode == config.ModeDocker
+
+		execInstructions := ""
+		if supportsExec {
+			execInstructions = `
+{"type":"exec","command":["ls","-la"]}  // runs a command in the container
+{"type":"exec","command":["echo","hello"]}`
+		}
+
 		systemMsg = provider.Message{
 			Role: "system",
-			Content: `You are an AI assistant that can perform file operations when requested.
+			Content: fmt.Sprintf(`You are an AI assistant that can perform file operations when requested.
 IMPORTANT: Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
 
 To perform a file operation, output a JSON object on its own line with the following format:
@@ -149,6 +178,7 @@ To perform a file operation, output a JSON object on its own line with the follo
 {"type":"delete","path":"filename.txt"}
 {"type":"list"}  // lists all files in workspace
 Only use relative paths. Do not use absolute paths. Do not include any other text with the JSON.`,
+				execInstructions),
 		}
 	} else {
 		systemMsg = provider.Message{
@@ -256,12 +286,12 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 		// Add cleaned response to messages slice
 		messages = append(messages, provider.Message{Role: "assistant", Content: cleanedResponse})
 
-		// Execute any file operations requested in the response
-		if sb != nil {
+		// Execute any actions requested in the response
+		if exec != nil {
 			actList, err := actions.Parse(fullResponse.String())
 			if err == nil && len(actList) > 0 {
 				fmt.Println()
-				fmt.Println("The AI requested the following file operations:")
+				fmt.Println("The AI requested the following operations:")
 				for _, act := range actList {
 					fmt.Printf("- %s\n", act.String())
 				}
@@ -270,7 +300,7 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 				confirm = strings.TrimSpace(strings.ToLower(confirm))
 				if confirm == "y" || confirm == "yes" {
 					for _, act := range actList {
-						executeAction(sb, act)
+						executeAction(exec, act)
 					}
 				} else {
 					fmt.Println("Operations cancelled.")
@@ -281,32 +311,37 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 	return nil
 }
 
-// executeAction performs a single file operation using the sandbox.
-func executeAction(sb *sandbox.Sandbox, act actions.Action) {
+// executeAction performs a single operation using the executor.
+func executeAction(exec executor.Executor, act actions.Action) {
+	ctx := context.Background()
+
 	switch act.Type {
 	case actions.TypeWrite:
-		err := sb.WriteFile(act.Path, []byte(act.Content))
+		err := exec.WriteFile(act.Path, []byte(act.Content))
 		if err != nil {
 			fmt.Printf("Error: Write %s: %v\n", act.Path, err)
 		} else {
 			fmt.Printf("Ok: Written to %s\n", act.Path)
 		}
+
 	case actions.TypeRead:
-		data, err := sb.ReadFile(act.Path)
+		data, err := exec.ReadFile(act.Path)
 		if err != nil {
 			fmt.Printf("Error: Read %s: %v\n", act.Path, err)
 		} else {
 			fmt.Printf("Ok: %s:\n%s\n", act.Path, string(data))
 		}
+
 	case actions.TypeDelete:
-		err := sb.DeleteFile(act.Path)
+		err := exec.DeleteFile(act.Path)
 		if err != nil {
 			fmt.Printf("Error: Delete %s: %v\n", act.Path, err)
 		} else {
 			fmt.Printf("Ok: Deleted %s\n", act.Path)
 		}
+
 	case actions.TypeList:
-		files, err := sb.ListFiles()
+		files, err := exec.ListFiles()
 		if err != nil {
 			fmt.Printf("Error: List files: %v\n", err)
 		} else {
@@ -315,6 +350,20 @@ func executeAction(sb *sandbox.Sandbox, act actions.Action) {
 				fmt.Printf("  - %s\n", f)
 			}
 		}
+
+	case actions.TypeExec:
+		output, err := exec.RunCommand(ctx, act.Command)
+		if err != nil {
+			fmt.Printf("Error: Command execution failed: %v\n", err)
+			if output != "" {
+				fmt.Printf("Output: %s\n", output)
+			}
+		} else {
+			fmt.Printf("Ok: Command executed successfully:\n%s\n", output)
+		}
+
+	default:
+		fmt.Printf("Error: Unknown action type: %s\n", act.Type)
 	}
 }
 
