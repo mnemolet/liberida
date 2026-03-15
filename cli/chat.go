@@ -169,7 +169,7 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 
 		systemMsg = provider.Message{
 			Role: "system",
-			Content: fmt.Sprintf(`You are an AI assistant that can perform file operations when requested.
+			Content: fmt.Sprint(`You are an AI assistant that can perform file operations when requested.
 IMPORTANT: Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
 
 To perform a file operation, output a JSON object on its own line with the following format:
