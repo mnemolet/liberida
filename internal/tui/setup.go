@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mnemolet/liberida/internal/config"
@@ -131,16 +135,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case stepOllamaURL:
 				if m.cursor == 0 {
 					m.ollamaURL = defaultOllamaURL
+
+					// Try to fetch models from Ollama
+					fmt.Print("\nConnecting to Ollama to fetch available models...")
+					models, err := fetchOllamaModels(m.ollamaURL)
+					if err != nil {
+						// If we can't fetch, use default list
+						fmt.Println("Could not connect to Ollama, using default model list.")
+						log.Printf("Failed to fetch models: %v", err)
+						m.choices = modelChoices
+					} else {
+						fmt.Println("Found", len(models), "models!")
+						m.choices = models
+					}
+
 					m.step = stepModel
 					m.cursor = 0
 					m.question = "Select Model:"
-					m.choices = modelChoices
 				} else {
 					m.step = 2
 					m.cursor = 0
 				}
 			case stepModel:
-				m.model = modelChoices[m.cursor]
+				m.model = m.choices[m.cursor] //modelChoices[m.cursor]
 				m.step = stepExecMode
 				m.cursor = 0
 				m.question = "Execution Mode:"
@@ -265,4 +282,40 @@ func (m Model) renderComplete() string {
 
 func (m Model) Completed() bool {
 	return m.completed
+}
+
+// OllamaModelsResponse represents the response from Ollama's /api/tags endpoint
+type OllamaModelsResponse struct {
+	Models []struct {
+		Name string `json:"name"`
+	} `json:"models"`
+}
+
+// fetchOllamaModels attempts to get the list of models from a running Ollama instance
+func fetchOllamaModels(ollamaURL string) ([]string, error) {
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+	}
+
+	resp, err := client.Get(strings.TrimRight(ollamaURL, "/") + "/api/tags")
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama returned status %d", resp.StatusCode)
+	}
+
+	var modelsResp OllamaModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	var models []string
+	for _, m := range modelsResp.Models {
+		models = append(models, m.Name)
+	}
+
+	return models, nil
 }
