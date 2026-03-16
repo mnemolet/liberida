@@ -71,6 +71,21 @@ func NewPodman(containerName, image, workspaceDir string) (*PodmanExecutor, erro
 			return nil, err
 		}
 
+		// If image is not present, pull it from repo.
+		_, err = cli.ImageInspect(ctx, image)
+		if err != nil {
+			fmt.Printf("Pulling image %s...\n", image)
+
+			// Pull still requires an options struct for auth/platform
+			pullRes, err := cli.ImagePull(ctx, image, client.ImagePullOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to pull image %s: %w", image, err)
+			}
+
+			defer pullRes.Close()
+			io.Copy(io.Discard, pullRes)
+		}
+
 		hostConfig := &container.HostConfig{
 			Binds: []string{absWorkspace + ":" + mountPoint},
 		}
