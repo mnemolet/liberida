@@ -21,8 +21,15 @@ type PodmanExecutor struct {
 }
 
 func NewPodman(containerName, image, workspaceDir string) (*PodmanExecutor, error) {
+	// Get the user's socket path for rootless podman
+	uid := os.Getuid()
+	socketPath := fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid)
+	if _, err := os.Stat(strings.TrimPrefix(socketPath, "unix://")); err != nil {
+		// Fall back to root socket
+		socketPath = "unix:///run/podman/podman.sock"
+	}
 	cli, err := client.New(
-		client.WithHost("unix:///run/podman/podman.sock"),
+		client.WithHost(socketPath),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Podman: %w", err)
