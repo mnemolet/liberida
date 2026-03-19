@@ -5,13 +5,15 @@ import (
 	"os"
 
 	"github.com/mnemolet/liberida/internal/config"
+	"github.com/mnemolet/liberida/internal/version"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "liberida",
-	Short: "LiberIda - local AI Agent",
-	Long:  `CLI LiberIda AI agent that runs locally using Ollama.`,
+	Use:     "liberida",
+	Short:   "LiberIda - local AI Agent",
+	Long:    `CLI LiberIda AI agent that runs locally using Ollama.`,
+	Version: version.Short(),
 	Run: func(cmd *cobra.Command, args []string) {
 		manager := config.NewManager()
 		manager.Load()
