@@ -53,6 +53,9 @@ func (m *Manager) Load() error {
 	m.viper.SetDefault("context_size", m.config.ContextSize)
 	m.viper.SetDefault("container_name", m.config.ContainerName)
 	m.viper.SetDefault("container_image", m.config.ContainerImage)
+	m.viper.SetDefault("openai_api_key", m.config.OpenAIAPIKey)
+	m.viper.SetDefault("anthropic_api_key", m.config.AnthropicAPIKey)
+	m.viper.SetDefault("gemini_api_key", m.config.GeminiAPIKey)
 
 	// Try to read existing config file
 	if err := m.viper.ReadInConfig(); err != nil {
@@ -82,6 +85,9 @@ func (m *Manager) Save() error {
 	m.viper.Set("context_size", m.config.ContextSize)
 	m.viper.Set("container_name", m.config.ContainerName)
 	m.viper.Set("container_image", m.config.ContainerImage)
+	m.viper.Set("openai_api_key", m.config.OpenAIAPIKey)
+	m.viper.Set("anthropic_api_key", m.config.AnthropicAPIKey)
+	m.viper.Set("gemini_api_key", m.config.GeminiAPIKey)
 
 	configFile := filepath.Join(m.configPath, defaultConfig)
 	return m.viper.WriteConfigAs(configFile)

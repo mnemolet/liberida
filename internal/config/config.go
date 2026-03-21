@@ -16,15 +16,18 @@ const (
 )
 
 type Config struct {
-	Provider       string        `mapstructure:"provider"`
-	OllamaURL      string        `mapstructure:"ollama_url"`
-	Model          string        `mapstructure:"model"`
-	ExecutionMode  ExecutionMode `mapstructure:"execution_mode"`
-	AllowedDir     string        `mapstructure:"allowed_dir"`
-	ContextSize    int           `mapstructure:"context_size"`
-	DBPath         string        `mapstructure:"db_path"`
-	ContainerName  string        `mapstructure:"container_name"`
-	ContainerImage string        `mapstructure:"container_image"`
+	Provider        string        `mapstructure:"provider"`
+	OllamaURL       string        `mapstructure:"ollama_url"`
+	Model           string        `mapstructure:"model"`
+	ExecutionMode   ExecutionMode `mapstructure:"execution_mode"`
+	AllowedDir      string        `mapstructure:"allowed_dir"`
+	ContextSize     int           `mapstructure:"context_size"`
+	DBPath          string        `mapstructure:"db_path"`
+	ContainerName   string        `mapstructure:"container_name"`
+	ContainerImage  string        `mapstructure:"container_image"`
+	OpenAIAPIKey    string        `mapstructure:"openai_api_key"`
+	AnthropicAPIKey string        `mapstructure:"anthropic_api_key"`
+	GeminiAPIKey    string        `mapstructure:"gemini_api_key"`
 }
 
 func DefaultConfig(hp HomeDirProvider) *Config {
@@ -33,15 +36,18 @@ func DefaultConfig(hp HomeDirProvider) *Config {
 	defaultDBPath := filepath.Join(home, ".liberida", "chat.db")
 
 	return &Config{
-		Provider:       "ollama",
-		OllamaURL:      "http://localhost:11434",
-		Model:          "llama2",
-		ExecutionMode:  ModeChatOnly,
-		AllowedDir:     defaultWorkspace,
-		ContextSize:    10,
-		DBPath:         defaultDBPath,
-		ContainerName:  "liberida-workspace",
-		ContainerImage: "alpine:latest",
+		Provider:        "ollama",
+		OllamaURL:       "http://localhost:11434",
+		Model:           "llama2",
+		ExecutionMode:   ModeChatOnly,
+		AllowedDir:      defaultWorkspace,
+		ContextSize:     10,
+		DBPath:          defaultDBPath,
+		ContainerName:   "liberida-workspace",
+		ContainerImage:  "alpine:latest",
+		OpenAIAPIKey:    "",
+		AnthropicAPIKey: "",
+		GeminiAPIKey:    "",
 	}
 }
 
