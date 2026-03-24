@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -102,6 +103,11 @@ func (c *HTTPClient) PostStream(ctx context.Context, endpoint string, body inter
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Accept", "text/event-stream")
 
+	// Add custom headers
+	for key, value := range c.headers {
+		req.Header.Set(key, value)
+	}
+
 	// Send request
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -139,16 +145,32 @@ func (c *HTTPClient) PostStream(ctx context.Context, endpoint string, body inter
 				return
 			}
 
-			// Send chunk
-			if line != "" {
-				select {
-				case <-ctx.Done():
-					return
-				case chunkChan <- line:
-				}
+			// Send the line as-is (including newline)
+			// The caller can parse the SSE format
+			select {
+			case <-ctx.Done():
+				return
+			case chunkChan <- line:
 			}
 		}
 	}()
 
 	return chunkChan, nil
+}
+
+// ParseSSEEvent extracts the data from an SSE event line
+func ParseSSEEvent(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "data: ") {
+		return "", false
+	}
+
+	data := strings.TrimPrefix(line, "data: ")
+	return data, true
+}
+
+// IsSSEDone checks if the line indicates the end of stream
+func IsSSEDone(line string) bool {
+	data, _ := ParseSSEEvent(line)
+	return data == "[DONE]"
 }
