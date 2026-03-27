@@ -33,24 +33,10 @@ var chatCmd = &cobra.Command{
 		}
 		cfg := manager.Get()
 
-		// Validate config has necessary fields
-		if cfg.Provider != "ollama" {
-			return fmt.Errorf("unsupported provider: %s (only ollama is currently supported)", cfg.Provider)
-		}
-		if cfg.OllamaURL == "" {
-			return fmt.Errorf("ollama URL not configured (run 'ai-agent configure')")
-		}
-		if cfg.Model == "" {
-			return fmt.Errorf("model not configured (run 'ai-agent configure')")
-		}
-
-		// Create provider
-		var prov provider.Provider
-		switch cfg.Provider {
-		case "ollama":
-			prov = provider.NewOllamaProvider(cfg.OllamaURL, cfg.Model)
-		default:
-			return fmt.Errorf("provider %s not implemented", cfg.Provider)
+		// Create Provider
+		prov, err := createProvider(cfg)
+		if err != nil {
+			return err
 		}
 
 		// Start chat session
@@ -62,6 +48,21 @@ func init() {
 	chatCmd.Flags().Uint("session", 0, "Resume existing session by ID")
 	chatCmd.Flags().Bool("new", false, "Force create new session (ignore --session)")
 	rootCmd.AddCommand(chatCmd)
+}
+
+func createProvider(cfg *config.Config) (provider.Provider, error) {
+	switch cfg.Provider {
+	case "ollama":
+		return provider.NewOllamaProvider(cfg.OllamaURL, cfg.Model), nil
+	case "openai":
+		return provider.NewProvider("openai", "", cfg.Model, cfg.OpenAIAPIKey)
+	case "anthropic":
+		return provider.NewProvider("anthropic", "", cfg.Model, cfg.AnthropicAPIKey)
+	case "gemini":
+		return provider.NewProvider("gemini", "", cfg.Model, cfg.GeminiAPIKey)
+	default:
+		return nil, fmt.Errorf("unknown provider: %s", cfg.Provider)
+	}
 }
 
 func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, forceNew bool) error {

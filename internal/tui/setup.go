@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -22,12 +23,14 @@ const (
 
 	stepWelcome = iota
 	stepProvider
+	stepProviderConfirm
 	stepOllamaURL
 	stepModel
 	stepExecMode
 	stepDirectory
+	stepContainerImage
 	stepComplete
-	totalSteps = 5
+	totalSteps = 8
 
 	title = "LiberIda Setup Wizard\n"
 )
@@ -50,7 +53,9 @@ var (
 	// Provider choices
 	providerChoices = []string{
 		"Ollama (local)",
-		// Future providers can be added here
+		"OpenAI (cloud, paid, requires API key)",
+		"Anthropic Claude (cloud, paid, requires API key)",
+		"Google Gemini (cloud, paid, requires API key)",
 	}
 
 	// Welcome screen choices
@@ -61,17 +66,20 @@ var (
 )
 
 type Model struct {
-	choices    []string
-	cursor     int
-	question   string
-	step       int
-	completed  bool
-	provider   string
-	ollamaURL  string
-	model      string
-	execMode   string
-	allowedDir string
-	configMgr  *config.Manager
+	choices          []string
+	cursor           int
+	question         string
+	step             int
+	completed        bool
+	provider         string
+	selectedProvider string
+	ollamaURL        string
+	model            string
+	execMode         string
+	allowedDir       string
+	containerImage   string
+	configMgr        *config.Manager
+	reader           *bufio.Reader
 }
 
 func InitialModel(cm *config.Manager) Model {
@@ -80,17 +88,20 @@ func InitialModel(cm *config.Manager) Model {
 	existing := cm.Get()
 
 	return Model{
-		step:       stepWelcome,
-		cursor:     0,
-		completed:  false,
-		provider:   existing.Provider,
-		ollamaURL:  existing.OllamaURL,
-		model:      existing.Model,
-		execMode:   string(existing.ExecutionMode),
-		allowedDir: existing.AllowedDir,
-		configMgr:  cm,
-		question:   "Welcome to LiberIda Setup!",
-		choices:    welcomeChoices,
+		step:             stepWelcome,
+		cursor:           0,
+		completed:        false,
+		provider:         existing.Provider,
+		selectedProvider: "",
+		ollamaURL:        existing.OllamaURL,
+		model:            existing.Model,
+		execMode:         string(existing.ExecutionMode),
+		allowedDir:       existing.AllowedDir,
+		containerImage:   existing.ContainerImage,
+		configMgr:        cm,
+		question:         "Welcome to LiberIda Setup!",
+		choices:          welcomeChoices,
+		reader:           bufio.NewReader(os.Stdin),
 	}
 }
 
@@ -127,11 +138,85 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 				}
 			case stepProvider:
-				m.provider = "ollama"
-				m.step = stepOllamaURL
-				m.cursor = 0
-				m.question = "Ollama URL:"
-				m.choices = urlChoices
+				// Provider selection
+				switch m.cursor {
+				case 0: // Ollama (local)
+					m.provider = "ollama"
+					m.step = stepOllamaURL
+					m.cursor = 0
+					m.question = "Ollama URL:"
+					m.choices = urlChoices
+
+				case 1: // OpenAI
+					m.provider = "openai"
+					m.selectedProvider = "openai"
+					m.step = stepProviderConfirm
+					m.cursor = 0
+					m.question = "OpenAI requires an API key and incurs usage costs.\nYou can add your API key later in ~/.liberida/config.toml"
+					m.choices = []string{
+						"Yes, continue with OpenAI",
+						"No, go back to provider selection",
+					}
+
+				case 2: // Anthropic Claude
+					m.provider = "anthropic"
+					m.selectedProvider = "anthropic"
+					m.step = stepProviderConfirm
+					m.cursor = 0
+					m.question = "Anthropic Claude requires an API key and incurs usage costs.\nYou can add your API key later in ~/.liberida/config.toml"
+					m.choices = []string{
+						"Yes, continue with Anthropic",
+						"No, go back to provider selection",
+					}
+
+				case 3: // Google Gemini
+					m.provider = "gemini"
+					m.selectedProvider = "gemini"
+					m.step = stepProviderConfirm
+					m.cursor = 0
+					m.question = "Google Gemini requires an API key and incurs usage costs.\nYou can add your API key later in ~/.liberida/config.toml"
+					m.choices = []string{
+						"Yes, continue with Gemini",
+						"No, go back to provider selection",
+					}
+				}
+			case stepProviderConfirm:
+				if m.cursor == 0 {
+					// User confirmed
+					m.step = stepModel
+					m.cursor = 0
+
+					// Set appropriate model choices based on provider
+					switch m.provider {
+					case "openai":
+						m.question = "Select OpenAI Model:"
+						m.choices = []string{
+							"gpt-5.4-pro",
+							"gpt-5.4",
+							"gpt-5.4-mini",
+							"gpt-5.3-codex",
+						}
+					case "anthropic":
+						m.question = "Select Claude Model:"
+						m.choices = []string{
+							"claude-opus-4.5",
+							"claude-sonnet-4.5",
+							"claude-haiku-4.5",
+						}
+					case "gemini":
+						m.question = "Select Gemini Model:"
+						m.choices = []string{
+							"gemini-pro-2.5",
+							"gemini-flash-2.5",
+						}
+					}
+				} else {
+					// User cancelled, go back to provider selection
+					m.step = stepProvider
+					m.cursor = 0
+					m.question = "Select AI Provider:"
+					m.choices = providerChoices
+				}
 			case stepOllamaURL:
 				if m.cursor == 0 {
 					m.ollamaURL = defaultOllamaURL
@@ -211,12 +296,20 @@ func (m *Model) saveConfig() {
 	cfg.OllamaURL = m.ollamaURL
 	cfg.Model = m.model
 	cfg.ExecutionMode = config.ExecutionMode(m.execMode)
+	cfg.ContainerImage = m.containerImage
 
 	// Only set AllowedDir if not in chat-only mode
 	if m.execMode == string(config.ModeChatOnly) {
 		cfg.AllowedDir = "" // Clear any existing directory for chat-only mode
 	} else {
 		cfg.AllowedDir = m.allowedDir
+	}
+
+	// Set container name for Docker/Podman modes
+	if m.execMode == string(config.ModeDocker) || m.execMode == string(config.ModePodman) {
+		if cfg.ContainerName == "" {
+			cfg.ContainerName = "liberida-workspace"
+		}
 	}
 
 	if err := m.configMgr.Save(); err != nil {
