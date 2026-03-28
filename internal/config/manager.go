@@ -56,6 +56,7 @@ func (m *Manager) Load() error {
 	m.viper.SetDefault("openai_api_key", m.config.OpenAIAPIKey)
 	m.viper.SetDefault("anthropic_api_key", m.config.AnthropicAPIKey)
 	m.viper.SetDefault("gemini_api_key", m.config.GeminiAPIKey)
+	m.viper.SetDefault("auto_context", m.config.AutoContext)
 
 	// Try to read existing config file
 	if err := m.viper.ReadInConfig(); err != nil {
@@ -88,6 +89,7 @@ func (m *Manager) Save() error {
 	m.viper.Set("openai_api_key", m.config.OpenAIAPIKey)
 	m.viper.Set("anthropic_api_key", m.config.AnthropicAPIKey)
 	m.viper.Set("gemini_api_key", m.config.GeminiAPIKey)
+	m.viper.Set("auto_context", m.config.AutoContext)
 
 	configFile := filepath.Join(m.configPath, defaultConfig)
 	return m.viper.WriteConfigAs(configFile)
