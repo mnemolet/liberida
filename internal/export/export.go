@@ -9,7 +9,7 @@ import (
 type Format string
 
 const (
-	FormatMarkdown Format = "markdown"
+	FormatMarkdown Format = "md"
 	FormatJSON     Format = "json"
 )
 
