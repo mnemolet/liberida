@@ -12,11 +12,14 @@ import (
 
 	"github.com/mnemolet/liberida/internal/actions"
 	"github.com/mnemolet/liberida/internal/config"
+	workspace "github.com/mnemolet/liberida/internal/context"
 	"github.com/mnemolet/liberida/internal/db"
 	"github.com/mnemolet/liberida/internal/executor"
 	"github.com/mnemolet/liberida/internal/provider"
 	"github.com/spf13/cobra"
 )
+
+var autoContextFlag bool
 
 var chatCmd = &cobra.Command{
 	Use:   "chat",
@@ -47,6 +50,7 @@ var chatCmd = &cobra.Command{
 func init() {
 	chatCmd.Flags().Uint("session", 0, "Resume existing session by ID")
 	chatCmd.Flags().Bool("new", false, "Force create new session (ignore --session)")
+	chatCmd.Flags().Bool("no-context", false, "Disable automatic workspace context")
 	rootCmd.AddCommand(chatCmd)
 }
 
@@ -155,6 +159,19 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 	// Build messages slice from history
 	messages := make([]provider.Message, 0)
 
+	// Collect workspace context if enabled
+	var contextStr string
+	if cfg.AutoContext && exec != nil {
+		fmt.Print("Scanning workspace for context...")
+		scanner := workspace.NewWorkspaceScanner()
+		contextStr, err = scanner.CollectContext(exec, cfg.AllowedDir)
+		if err != nil {
+			fmt.Printf("Could not collect workspace context: %v\n", err)
+		} else {
+			fmt.Println("Done")
+		}
+	}
+
 	// System message with mode-appropriate instructions
 	var systemMsg provider.Message
 	if exec != nil {
@@ -168,9 +185,7 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 {"type":"exec","command":["echo","hello"]}`
 		}
 
-		systemMsg = provider.Message{
-			Role: "system",
-			Content: fmt.Sprint(`You are an AI assistant that can perform file operations when requested.
+		systemMsgContent := fmt.Sprint(`You are an AI assistant that can perform file operations when requested.
 IMPORTANT: Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
 
 To perform a file operation, output a JSON object on its own line with the following format:
@@ -179,7 +194,15 @@ To perform a file operation, output a JSON object on its own line with the follo
 {"type":"delete","path":"filename.txt"}
 {"type":"list"}  // lists all files in workspace
 Only use relative paths. Do not use absolute paths. Do not include any other text with the JSON.`,
-				execInstructions),
+			execInstructions)
+		// Add workspace context if available
+		if contextStr != "" {
+			systemMsgContent = fmt.Sprintf("%s\n\n%s", systemMsgContent, contextStr)
+		}
+
+		systemMsg = provider.Message{
+			Role:    "system",
+			Content: systemMsgContent,
 		}
 	} else {
 		systemMsg = provider.Message{
