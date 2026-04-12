@@ -35,7 +35,7 @@ go.work.sum
 # .vscode/
 
 # log files
-.log
+*.log
 
 # custom
 test-ollama/

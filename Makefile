@@ -13,6 +13,26 @@ LDFLAGS += -X github.com/mnemolet/liberida/internal/version.BuiltBy=$(BUILT_BY)
 # Binary name
 BINARY = liberida
 
+# Default target
+.PHONY: all
+all: test build
+
+# Run tests
+.PHONY: test
+test:
+	@echo "Running tests..."
+	go test ./... -v
+
+# Run tests with coverage
+.PHONY: test-coverage
+test-coverage:
+	@echo "Running tests with coverage..."
+	go test -cover ./...
+	@echo "Generating coverage report..."
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report saved to coverage.html"
+
 .PHONY: build
 build:
 	go build -ldflags "$(LDFLAGS)" -o build/$(BINARY) ./cli
