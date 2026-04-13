@@ -112,6 +112,32 @@ var sessionsDeleteCmd = &cobra.Command{
 	},
 }
 
+var sessionsRenameCmd = &cobra.Command{
+	Use:   "rename [session-id] [new-title]",
+	Short: "Rename a session",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseUint(args[0], 10, 32)
+		if err != nil {
+			return fmt.Errorf("invalid session ID: %w", err)
+		}
+		newTitle := args[1]
+
+		dbManager, err := initSessionCommand()
+		if err != nil {
+			return err
+		}
+		defer dbManager.Close()
+
+		if err := dbManager.UpdateSessionTitle(uint(id), newTitle); err != nil {
+			return err
+		}
+
+		fmt.Printf("Session %d renamed to: %s\n", id, newTitle)
+		return nil
+	},
+}
+
 // Helper to initialize config and db for session commands
 func initSessionCommand() (*db.Manager, error) {
 	cfgManager := config.NewManager()
@@ -139,5 +165,6 @@ func init() {
 	sessionsCmd.AddCommand(sessionsListCmd)
 	sessionsCmd.AddCommand(sessionsShowCmd)
 	sessionsCmd.AddCommand(sessionsDeleteCmd)
+	sessionsCmd.AddCommand(sessionsRenameCmd)
 	rootCmd.AddCommand(sessionsCmd)
 }
