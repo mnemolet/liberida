@@ -299,21 +299,23 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 			fmt.Printf("Warning: failed to save message: %v\n", err)
 		}
 
-		// Generate title from first user message in background (non-blocking)
+		// Generate title from first user message
 		if cfg.AutoTitle && !titleGenerated && len(currentSession.Messages) == 0 {
-			// Generate title in background to avoid blocking chat
-			go func() {
-				title, err := llm.GenerateTitle(context.Background(), prov, input)
-				if err != nil || title == "" {
-					// Fallback to truncated first message
-					title = input
-					if len(title) > 30 {
-						title = title[:27] + "..."
-					}
+			title, err := llm.GenerateTitle(ctx, prov, input)
+			if err != nil || title == "" {
+				// Fallback to truncated first message
+				title = input
+				if len(title) > 30 {
+					title = title[:27] + "..."
 				}
-				dbManager.UpdateSessionTitle(currentSession.ID, title)
-				fmt.Printf("\nSession titled: %s\n", title)
-			}()
+				fmt.Printf("\nUsing fallback title: %s\n", title)
+			} else {
+				fmt.Printf("\nGenerated title: %s\n", title)
+			}
+
+			if err := dbManager.UpdateSessionTitle(currentSession.ID, title); err != nil {
+				fmt.Printf("Warning: failed to save title: %v\n", err)
+			}
 			titleGenerated = true
 		}
 
