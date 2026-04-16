@@ -15,6 +15,7 @@ import (
 	workspace "github.com/mnemolet/liberida/internal/context"
 	"github.com/mnemolet/liberida/internal/db"
 	"github.com/mnemolet/liberida/internal/executor"
+	"github.com/mnemolet/liberida/internal/llm"
 	"github.com/mnemolet/liberida/internal/provider"
 	"github.com/spf13/cobra"
 )
@@ -185,8 +186,41 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 {"type":"exec","command":["echo","hello"]}`
 		}
 
-		systemMsgContent := fmt.Sprint(`You are an AI assistant that can perform file operations when requested.
-IMPORTANT: Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
+		systemMsgContent := fmt.Sprint(`You are a helpful AI assistant. 
+You can answer questions and also perform file operations when asked.
+CRITICAL INSTRUCTION:
+- For NORMAL questions: Respond with plain text, just like a normal conversation
+- For FILE OPERATIONS: Output a single JSON object on its own line
+- Never output JSON for normal questions
+- Never output {"type":"none"} or any other JSON unless performing file operations
+- Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
+
+NORMAL CONVERSATION EXAMPLE (what you should do 99% of the time):
+User: "What is Python?"
+You: Python is a high-level, interpreted programming language known for its simplicity...
+
+User: "Explain variables"
+You: A variable is a container for storing data values...
+User: "who are you?"
+You: I'm an AI assistant that can help you with programming and general questions...
+
+FILE OPERATION EXAMPLES (only when user explicitly asks for file operations):
+User: "List my files"
+You: {"type":"list"}
+
+User: "Create a file called test.txt"
+You: {"type":"write","path":"test.txt","content":"your content here"}
+
+User: "Read config.json"
+You: {"type":"read","path":"config.json"}
+
+User: "Delete temp.log"
+You: {"type":"delete","path":"temp.log"}
+
+REMEMBER:
+- Answer questions with helpful text responses
+- Use JSON ONLY for file operations
+- Never use JSON for conversation
 
 To perform a file operation, output a JSON object on its own line with the following format:
 {"type":"write","path":"filename.txt","content":"file content"}
@@ -265,13 +299,23 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 			fmt.Printf("Warning: failed to save message: %v\n", err)
 		}
 
-		// Generate title from first user message if not already set
-		if !titleGenerated && len(currentSession.Messages) == 0 {
-			newTitle := input
-			if len(newTitle) > 30 {
-				newTitle = newTitle[:27] + "..."
+		// Generate title from first user message
+		if cfg.AutoTitle && !titleGenerated && len(currentSession.Messages) == 0 {
+			title, err := llm.GenerateTitle(ctx, prov, input)
+			if err != nil || title == "" {
+				// Fallback to truncated first message
+				title = input
+				if len(title) > 30 {
+					title = title[:27] + "..."
+				}
+				fmt.Printf("\nUsing fallback title: %s\n", title)
+			} else {
+				fmt.Printf("\nGenerated title: %s\n", title)
 			}
-			dbManager.UpdateSessionTitle(currentSession.ID, newTitle)
+
+			if err := dbManager.UpdateSessionTitle(currentSession.ID, title); err != nil {
+				fmt.Printf("Warning: failed to save title: %v\n", err)
+			}
 			titleGenerated = true
 		}
 

@@ -29,6 +29,7 @@ type Config struct {
 	AnthropicAPIKey string        `mapstructure:"anthropic_api_key"`
 	GeminiAPIKey    string        `mapstructure:"gemini_api_key"`
 	AutoContext     bool          `mapstructure:"auto_context"`
+	AutoTitle       bool          `mapstructure:"auto_title"`
 }
 
 func DefaultConfig(hp HomeDirProvider) *Config {
@@ -50,6 +51,7 @@ func DefaultConfig(hp HomeDirProvider) *Config {
 		AnthropicAPIKey: "",
 		GeminiAPIKey:    "",
 		AutoContext:     true,
+		AutoTitle:       true,
 	}
 }
 
