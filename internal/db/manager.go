@@ -138,3 +138,13 @@ func (m *Manager) Close() error {
 	}
 	return sqlDB.Close()
 }
+
+// GetMessageCount returns the number of messages in a session
+func (m *Manager) GetMessageCount(sessionID uint) (int, error) {
+	var count int64
+	err := m.db.Model(&ChatMessage{}).Where("session_id = ?", sessionID).Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("failed to count messages: %w", err)
+	}
+	return int(count), nil
+}
