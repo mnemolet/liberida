@@ -37,10 +37,16 @@ var sessionsListCmd = &cobra.Command{
 
 		fmt.Println("Saved Sessions:")
 		for _, s := range sessions {
+			// Get message count
+			msgCount, err := dbManager.GetMessageCount(s.ID)
+			if err != nil {
+				msgCount = 0 // Fallback
+			}
+
 			fmt.Printf("  [%d] %s (%d messages) - %s\n",
 				s.ID,
 				truncateString(s.Title, 40),
-				len(s.Messages),
+				msgCount,
 				s.UpdatedAt.Format("2006-01-02 15:04"))
 		}
 		return nil
