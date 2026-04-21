@@ -27,10 +27,28 @@ type ChatMessage struct {
 	Session ChatSession `gorm:"foreignKey:SessionID" json:"-"`
 }
 
+// TokenUsage represents token usage for a message
+type TokenUsage struct {
+	ID               uint      `gorm:"primaryKey;autoIncrement"`
+	SessionID        uint      `gorm:"not null;index"`
+	MessageID        uint      `gorm:"not null;index"`
+	Provider         string    `gorm:"size:50;not null"`
+	Model            string    `gorm:"size:100;not null"`
+	PromptTokens     int       `gorm:"not null"`
+	CompletionTokens int       `gorm:"not null"`
+	TotalTokens      int       `gorm:"not null"`
+	EstimatedCost    float64   `gorm:"type:decimal(10,8)"`
+	CreatedAt        time.Time `gorm:"not null"`
+}
+
 func (ChatSession) TableName() string {
 	return "chat_sessions"
 }
 
 func (ChatMessage) TableName() string {
 	return "chat_messages"
+}
+
+func (TokenUsage) TableName() string {
+	return "token_usage"
 }
