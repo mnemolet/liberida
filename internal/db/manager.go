@@ -29,7 +29,7 @@ func NewManager(dbPath string) (*Manager, error) {
 	}
 
 	// Auto-migrate the schemas
-	if err := db.AutoMigrate(&ChatSession{}, &ChatMessage{}); err != nil {
+	if err := db.AutoMigrate(&ChatSession{}, &ChatMessage{}, &TokenUsage{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
