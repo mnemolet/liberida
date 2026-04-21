@@ -328,7 +328,7 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 		}
 
 		fmt.Print("AI: ")
-		chunkChan, err := prov.Stream(ctx, req)
+		chunkChan, usageChan, err := prov.Stream(ctx, req)
 		if err != nil {
 			fmt.Printf("\nError: %v\n", err)
 			continue
@@ -340,6 +340,29 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 			fullResponse.WriteString(chunk)
 		}
 		fmt.Println()
+
+		// Get usage information
+		var usage provider.Usage
+		select {
+		case u, ok := <-usageChan:
+			if ok {
+				usage = u
+			}
+		default:
+			// No usage data available
+		}
+
+		// Calculate cost based on provider and model
+		if usage.TotalTokens > 0 && usage.EstimatedCost == 0 {
+			pricing := provider.GetPricing(cfg.Provider, cfg.Model)
+			usage.EstimatedCost = provider.CalculateCost(usage.PromptTokens, usage.CompletionTokens, pricing)
+		}
+
+		// Display usage information
+		if cfg.ShowUsage {
+			fmt.Printf("\n[Tokens: %d prompt, %d completion, %d total | Cost: $%.6f]\n",
+				usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.EstimatedCost)
+		}
 
 		// Clean the AI response
 		rawResponse := fullResponse.String()
