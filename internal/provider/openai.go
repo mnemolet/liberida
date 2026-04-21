@@ -43,6 +43,11 @@ type openaiResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage,omitempty"`
 }
 
 // openaiStreamResponse represents a streaming response chunk
@@ -52,6 +57,11 @@ type openaiStreamResponse struct {
 			Content string `json:"content"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage,omitempty"`
 }
 
 // Complete sends a non-streaming request to OpenAI
@@ -78,13 +88,30 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req Request) (*Response, 
 		return nil, fmt.Errorf("no response from OpenAI")
 	}
 
+	usage := Usage{
+		PromptTokens:     0,
+		CompletionTokens: 0,
+		TotalTokens:      0,
+		EstimatedCost:    0,
+	}
+
+	if resp.Usage != nil {
+		usage = Usage{
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.TotalTokens,
+			EstimatedCost:    0, // Will be calculated by caller
+		}
+	}
+
 	return &Response{
 		Content: resp.Choices[0].Message.Content,
+		Usage:   usage,
 	}, nil
 }
 
 // Stream sends a streaming request to OpenAI
-func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan string, error) {
+func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
 	model := req.Model
 	if model == "" {
 		model = p.model
@@ -100,14 +127,18 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan string
 
 	chunkChan, err := p.client.PostStream(ctx, "/chat/completions", openaiReq)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Transform SSE chunks into content strings
 	contentChan := make(chan string)
+	usageChan := make(chan Usage)
 
 	go func() {
 		defer close(contentChan)
+		defer close(usageChan)
+
+		var finalUsage *Usage
 
 		for chunk := range chunkChan {
 			// Remove "data: " prefix
@@ -133,10 +164,29 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan string
 					}
 				}
 			}
+
+			// Capture usage from the response (usually in the last chunk)
+			if streamResp.Usage != nil {
+				finalUsage = &Usage{
+					PromptTokens:     streamResp.Usage.PromptTokens,
+					CompletionTokens: streamResp.Usage.CompletionTokens,
+					TotalTokens:      streamResp.Usage.TotalTokens,
+					EstimatedCost:    0, // Will be calculated by caller
+				}
+			}
+		}
+
+		// Send usage if we have it
+		if finalUsage != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case usageChan <- *finalUsage:
+			}
 		}
 	}()
 
-	return contentChan, nil
+	return contentChan, usageChan, nil
 }
 
 // ListModels returns available OpenAI models
