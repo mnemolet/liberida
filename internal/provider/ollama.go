@@ -171,12 +171,12 @@ func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string
 	}
 
 	chunkChan := make(chan string)
-	usageChan := make(chan Usage)
+	usageChan := make(chan Usage, 1) // Buffered channel to prevent blocking
 
 	go func() {
 		defer resp.Body.Close()
 		defer close(chunkChan)
-		defer close(usageChan) // FIX 1: Close usageChan
+		defer close(usageChan)
 
 		scanner := bufio.NewScanner(resp.Body)
 		var finalUsage *Usage

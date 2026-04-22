@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/mnemolet/liberida/internal/actions"
 	"github.com/mnemolet/liberida/internal/config"
@@ -347,9 +348,13 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 		case u, ok := <-usageChan:
 			if ok {
 				usage = u
+			} else {
 			}
+		case <-time.After(1 * time.Second):
+			// Timeout
 		default:
 			// No usage data available
+			fmt.Println("[DEBUG] No usage data available immediately")
 		}
 
 		// Calculate cost based on provider and model
