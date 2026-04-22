@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mnemolet/liberida/internal/provider"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -28,7 +29,7 @@ func NewManager(dbPath string) (*Manager, error) {
 	}
 
 	// Auto-migrate the schemas
-	if err := db.AutoMigrate(&ChatSession{}, &ChatMessage{}); err != nil {
+	if err := db.AutoMigrate(&ChatSession{}, &ChatMessage{}, &TokenUsage{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
@@ -147,4 +148,76 @@ func (m *Manager) GetMessageCount(sessionID uint) (int, error) {
 		return 0, fmt.Errorf("failed to count messages: %w", err)
 	}
 	return int(count), nil
+}
+
+// SaveTokenUsage stores token usage for a message
+func (m *Manager) SaveTokenUsage(sessionID, messageID uint, provider, model string, usage provider.Usage) error {
+	tokenUsage := &TokenUsage{
+		SessionID:        sessionID,
+		MessageID:        messageID,
+		Provider:         provider,
+		Model:            model,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+		EstimatedCost:    usage.EstimatedCost,
+		CreatedAt:        time.Now(),
+	}
+
+	result := m.db.Create(tokenUsage)
+	if result.Error != nil {
+		return fmt.Errorf("failed to save token usage: %w", result.Error)
+	}
+	return nil
+}
+
+// GetSessionUsage returns aggregated usage for a session
+func (m *Manager) GetSessionUsage(sessionID uint) (*provider.Usage, error) {
+	var result struct {
+		SumPromptTokens     int
+		SumCompletionTokens int
+		SumTotalTokens      int
+		SumCost             float64
+	}
+
+	err := m.db.Model(&TokenUsage{}).
+		Select("SUM(prompt_tokens) as sum_prompt_tokens, SUM(completion_tokens) as sum_completion_tokens, SUM(total_tokens) as sum_total_tokens, SUM(estimated_cost) as sum_cost").
+		Where("session_id = ?", sessionID).
+		Scan(&result).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session usage: %w", err)
+	}
+
+	return &provider.Usage{
+		PromptTokens:     result.SumPromptTokens,
+		CompletionTokens: result.SumCompletionTokens,
+		TotalTokens:      result.SumTotalTokens,
+		EstimatedCost:    result.SumCost,
+	}, nil
+}
+
+// GetTotalUsage returns aggregated usage for all sessions
+func (m *Manager) GetTotalUsage() (*provider.Usage, error) {
+	var result struct {
+		SumPromptTokens     int
+		SumCompletionTokens int
+		SumTotalTokens      int
+		SumCost             float64
+	}
+
+	err := m.db.Model(&TokenUsage{}).
+		Select("SUM(prompt_tokens) as sum_prompt_tokens, SUM(completion_tokens) as sum_completion_tokens, SUM(total_tokens) as sum_total_tokens, SUM(estimated_cost) as sum_cost").
+		Scan(&result).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total usage: %w", err)
+	}
+
+	return &provider.Usage{
+		PromptTokens:     result.SumPromptTokens,
+		CompletionTokens: result.SumCompletionTokens,
+		TotalTokens:      result.SumTotalTokens,
+		EstimatedCost:    result.SumCost,
+	}, nil
 }

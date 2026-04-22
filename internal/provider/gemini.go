@@ -132,13 +132,21 @@ func (p *GeminiProvider) Complete(ctx context.Context, req Request) (*Response, 
 		return nil, fmt.Errorf("empty response from Gemini")
 	}
 
+	usage := Usage{
+		PromptTokens:     resp.UsageMetadata.PromptTokenCount,
+		CompletionTokens: resp.UsageMetadata.CandidatesTokenCount,
+		TotalTokens:      resp.UsageMetadata.TotalTokenCount,
+		EstimatedCost:    0, // Will be calculated by caller
+	}
+
 	return &Response{
 		Content: resp.Candidates[0].Content.Parts[0].Text,
+		Usage:   usage,
 	}, nil
 }
 
 // Stream sends a streaming request to Gemini
-func (p *GeminiProvider) Stream(ctx context.Context, req Request) (<-chan string, error) {
+func (p *GeminiProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
 	model := req.Model
 	if model == "" {
 		model = p.model
@@ -159,13 +167,17 @@ func (p *GeminiProvider) Stream(ctx context.Context, req Request) (<-chan string
 	endpoint := fmt.Sprintf("/models/%s:streamGenerateContent?key=%s", model, p.client.apiKey)
 	chunkChan, err := p.client.PostStream(ctx, endpoint, geminiReq)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	contentChan := make(chan string)
+	usageChan := make(chan Usage)
 
 	go func() {
 		defer close(contentChan)
+		defer close(usageChan)
+
+		var finalUsage *Usage
 
 		for chunk := range chunkChan {
 			// Remove "data: " prefix if present (from SSE)
@@ -194,10 +206,22 @@ func (p *GeminiProvider) Stream(ctx context.Context, req Request) (<-chan string
 					}
 				}
 			}
+			// Note: Gemini streaming responses don't include usage metadata in each chunk
+			// Usage is typically only available in the final non-streaming response
+			// For now, we'll send usage as zero and let the caller calculate
+		}
+
+		// If we have final usage from somewhere, send it
+		if finalUsage != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case usageChan <- *finalUsage:
+			}
 		}
 	}()
 
-	return contentChan, nil
+	return contentChan, usageChan, nil
 }
 
 // ListModels returns available Gemini models

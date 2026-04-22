@@ -44,9 +44,11 @@ type ollamaGenerateRequest struct {
 }
 
 type ollamaGenerateResponse struct {
-	Response string `json:"response"`
-	Context  []int  `json:"context"`
-	Done     bool   `json:"done"`
+	Response        string `json:"response"`
+	Context         []int  `json:"context"`
+	Done            bool   `json:"done"`
+	PromptEvalCount int    `json:"prompt_eval_count"`
+	EvalCount       int    `json:"eval_count"`
 }
 
 type ollamaTagsResponse struct {
@@ -117,11 +119,17 @@ func (p *OllamaProvider) Complete(ctx context.Context, req Request) (*Response, 
 
 	return &Response{
 		Content: ollamaResp.Response,
+		Usage: Usage{
+			PromptTokens:     ollamaResp.PromptEvalCount,
+			CompletionTokens: ollamaResp.EvalCount,
+			TotalTokens:      ollamaResp.PromptEvalCount + ollamaResp.EvalCount,
+			EstimatedCost:    0.0, // Free
+		},
 	}, nil
 }
 
 // Stream sends a streaming request and returns a channel of strings.
-func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string, error) {
+func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
 	model := req.Model
 	if model == "" {
 		model = p.model
@@ -142,60 +150,82 @@ func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string
 
 	data, err := json.Marshal(ollamaReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	url := p.baseURL + "/api/generate"
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return nil, nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, fmt.Errorf("ollama API returned status %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("ollama API returned status %d", resp.StatusCode)
 	}
 
-	// Create a channel to stream responses
 	chunkChan := make(chan string)
+	usageChan := make(chan Usage, 1) // Buffered channel to prevent blocking
 
 	go func() {
 		defer resp.Body.Close()
 		defer close(chunkChan)
+		defer close(usageChan)
 
 		scanner := bufio.NewScanner(resp.Body)
+		var finalUsage *Usage
+
 		for scanner.Scan() {
 			line := scanner.Text()
 			if line == "" {
 				continue
 			}
+
 			var ollamaResp ollamaGenerateResponse
 			if err := json.Unmarshal([]byte(line), &ollamaResp); err != nil {
-				// If we can't parse, send the raw line? Better to break.
-				// For robustness, we could send error but it's complex.
 				continue
 			}
+
+			// Send the response chunk
 			select {
 			case <-ctx.Done():
 				return
 			case chunkChan <- ollamaResp.Response:
 			}
+
+			// If this is the final response, capture usage
 			if ollamaResp.Done {
-				return
+				finalUsage = &Usage{
+					PromptTokens:     ollamaResp.PromptEvalCount,
+					CompletionTokens: ollamaResp.EvalCount,
+					TotalTokens:      ollamaResp.PromptEvalCount + ollamaResp.EvalCount,
+					EstimatedCost:    0.0,
+				}
+				break
 			}
 		}
+
+		// Send usage after loop completes
+		if finalUsage != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case usageChan <- *finalUsage:
+			}
+		}
+
 		if err := scanner.Err(); err != nil {
 			// Optionally log error
 		}
 	}()
 
-	return chunkChan, nil
+	return chunkChan, usageChan, nil
 }
 
 // ListModels returns the list of available models from Ollama.

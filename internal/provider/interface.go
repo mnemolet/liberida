@@ -2,6 +2,14 @@ package provider
 
 import "context"
 
+// Usage represents token usage and cost information
+type Usage struct {
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	TotalTokens      int     `json:"total_tokens"`
+	EstimatedCost    float64 `json:"estimated_cost"`
+}
+
 // Chat Message
 type Message struct {
 	Role    string // "user", "assistant", "system"
@@ -20,6 +28,7 @@ type Request struct {
 // Response from the LLM.
 type Response struct {
 	Content string
+	Usage   Usage
 }
 
 // Provider is the interface that all LLM providers must implement.
@@ -29,7 +38,7 @@ type Provider interface {
 	// Complete sends a request and returns the full response.
 	Complete(ctx context.Context, req Request) (*Response, error)
 	// Stream sends a request and returns a channel of response chunks.
-	Stream(ctx context.Context, req Request) (<-chan string, error)
+	Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error)
 	// ListModels returns available models (if supported).
 	ListModels(ctx context.Context) ([]string, error)
 }

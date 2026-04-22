@@ -42,6 +42,10 @@ type anthropicResponse struct {
 	Content []struct {
 		Text string `json:"text"`
 	} `json:"content"`
+	Usage *struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage,omitempty"`
 }
 
 // anthropicStreamResponse represents a streaming response chunk
@@ -50,6 +54,12 @@ type anthropicStreamResponse struct {
 	Delta struct {
 		Text string `json:"text"`
 	} `json:"delta"`
+	Message *struct {
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	} `json:"message,omitempty"`
 }
 
 // Complete sends a non-streaming request to Anthropic
@@ -94,13 +104,30 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req Request) (*Respons
 		return nil, fmt.Errorf("no response from Anthropic")
 	}
 
+	usage := Usage{
+		PromptTokens:     0,
+		CompletionTokens: 0,
+		TotalTokens:      0,
+		EstimatedCost:    0,
+	}
+
+	if resp.Usage != nil {
+		usage = Usage{
+			PromptTokens:     resp.Usage.InputTokens,
+			CompletionTokens: resp.Usage.OutputTokens,
+			TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+			EstimatedCost:    0, // Will be calculated by caller
+		}
+	}
+
 	return &Response{
 		Content: resp.Content[0].Text,
+		Usage:   usage,
 	}, nil
 }
 
 // Stream sends a streaming request to Anthropic
-func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan string, error) {
+func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
 	model := req.Model
 	if model == "" {
 		model = p.model
@@ -132,13 +159,17 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan str
 
 	chunkChan, err := p.client.PostStream(ctx, "/messages", anthropicReq)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	contentChan := make(chan string)
+	usageChan := make(chan Usage)
 
 	go func() {
 		defer close(contentChan)
+		defer close(usageChan)
+
+		var finalUsage *Usage
 
 		for chunk := range chunkChan {
 			// Parse SSE format
@@ -163,10 +194,28 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan str
 				case contentChan <- streamResp.Delta.Text:
 				}
 			}
+			// Capture usage from message_stop event
+			if streamResp.Type == "message_stop" && streamResp.Message != nil {
+				finalUsage = &Usage{
+					PromptTokens:     streamResp.Message.Usage.InputTokens,
+					CompletionTokens: streamResp.Message.Usage.OutputTokens,
+					TotalTokens:      streamResp.Message.Usage.InputTokens + streamResp.Message.Usage.OutputTokens,
+					EstimatedCost:    0, // Will be calculated by caller
+				}
+			}
+		}
+
+		// Send usage if we have it
+		if finalUsage != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case usageChan <- *finalUsage:
+			}
 		}
 	}()
 
-	return contentChan, nil
+	return contentChan, usageChan, nil
 }
 
 // ListModels returns available Anthropic models using the /v1/models endpoint

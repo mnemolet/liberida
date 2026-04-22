@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/mnemolet/liberida/internal/actions"
 	"github.com/mnemolet/liberida/internal/config"
@@ -328,7 +329,7 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 		}
 
 		fmt.Print("AI: ")
-		chunkChan, err := prov.Stream(ctx, req)
+		chunkChan, usageChan, err := prov.Stream(ctx, req)
 		if err != nil {
 			fmt.Printf("\nError: %v\n", err)
 			continue
@@ -340,6 +341,46 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 			fullResponse.WriteString(chunk)
 		}
 		fmt.Println()
+
+		// Get usage information
+		var usage provider.Usage
+		gotUsage := false // Track if we actually got data
+
+		select {
+		case u, ok := <-usageChan:
+			if ok {
+				usage = u
+				gotUsage = true
+			}
+		case <-time.After(2 * time.Second):
+			// Timeout
+			fmt.Println("[DEBUG] Timeout: No usage data received after 2 seconds")
+		}
+
+		// Only do this if we actually got usage data
+		if gotUsage {
+			// Calculate cost based on provider and model
+			if usage.TotalTokens > 0 {
+				pricing := provider.GetPricing(cfg.Provider, cfg.Model)
+				usage.EstimatedCost = provider.CalculateCost(usage.PromptTokens, usage.CompletionTokens, pricing)
+				// Get the message ID of the assistant's response
+				// We need to get the most recent message for this session
+				messages, err := dbManager.GetMessages(currentSession.ID)
+				if err == nil && len(messages) > 0 {
+					lastMessage := messages[len(messages)-1]
+					err = dbManager.SaveTokenUsage(currentSession.ID, lastMessage.ID, cfg.Provider, cfg.Model, usage)
+					if err != nil {
+						fmt.Printf("Warning: failed to save token usage: %v\n", err)
+					}
+				}
+			}
+
+			// Display usage information
+			if cfg.ShowUsage {
+				fmt.Printf("\n[Tokens: %d prompt, %d completion, %d total | Cost: $%.6f]\n",
+					usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.EstimatedCost)
+			}
+		}
 
 		// Clean the AI response
 		rawResponse := fullResponse.String()
