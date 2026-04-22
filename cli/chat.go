@@ -360,9 +360,19 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 		// Only do this if we actually got usage data
 		if gotUsage {
 			// Calculate cost based on provider and model
-			if usage.TotalTokens > 0 && usage.EstimatedCost == 0 {
+			if usage.TotalTokens > 0 {
 				pricing := provider.GetPricing(cfg.Provider, cfg.Model)
 				usage.EstimatedCost = provider.CalculateCost(usage.PromptTokens, usage.CompletionTokens, pricing)
+				// Get the message ID of the assistant's response
+				// We need to get the most recent message for this session
+				messages, err := dbManager.GetMessages(currentSession.ID)
+				if err == nil && len(messages) > 0 {
+					lastMessage := messages[len(messages)-1]
+					err = dbManager.SaveTokenUsage(currentSession.ID, lastMessage.ID, cfg.Provider, cfg.Model, usage)
+					if err != nil {
+						fmt.Printf("Warning: failed to save token usage: %v\n", err)
+					}
+				}
 			}
 
 			// Display usage information
