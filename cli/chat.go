@@ -344,29 +344,32 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 
 		// Get usage information
 		var usage provider.Usage
+		gotUsage := false // Track if we actually got data
+
 		select {
 		case u, ok := <-usageChan:
 			if ok {
 				usage = u
-			} else {
+				gotUsage = true
 			}
-		case <-time.After(1 * time.Second):
+		case <-time.After(2 * time.Second):
 			// Timeout
-		default:
-			// No usage data available
-			fmt.Println("[DEBUG] No usage data available immediately")
+			fmt.Println("[DEBUG] Timeout: No usage data received after 2 seconds")
 		}
 
-		// Calculate cost based on provider and model
-		if usage.TotalTokens > 0 && usage.EstimatedCost == 0 {
-			pricing := provider.GetPricing(cfg.Provider, cfg.Model)
-			usage.EstimatedCost = provider.CalculateCost(usage.PromptTokens, usage.CompletionTokens, pricing)
-		}
+		// Only do this if we actually got usage data
+		if gotUsage {
+			// Calculate cost based on provider and model
+			if usage.TotalTokens > 0 && usage.EstimatedCost == 0 {
+				pricing := provider.GetPricing(cfg.Provider, cfg.Model)
+				usage.EstimatedCost = provider.CalculateCost(usage.PromptTokens, usage.CompletionTokens, pricing)
+			}
 
-		// Display usage information
-		if cfg.ShowUsage {
-			fmt.Printf("\n[Tokens: %d prompt, %d completion, %d total | Cost: $%.6f]\n",
-				usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.EstimatedCost)
+			// Display usage information
+			if cfg.ShowUsage {
+				fmt.Printf("\n[Tokens: %d prompt, %d completion, %d total | Cost: $%.6f]\n",
+					usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.EstimatedCost)
+			}
 		}
 
 		// Clean the AI response
