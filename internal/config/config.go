@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -35,7 +36,6 @@ type Config struct {
 
 func DefaultConfig(hp HomeDirProvider) *Config {
 	home := hp.GetHomeDir()
-	defaultWorkspace := filepath.Join(home, "liberida-workspace")
 	defaultDBPath := filepath.Join(home, ".liberida", "chat.db")
 
 	return &Config{
@@ -43,7 +43,7 @@ func DefaultConfig(hp HomeDirProvider) *Config {
 		OllamaURL:       "http://localhost:11434",
 		Model:           "llama2",
 		ExecutionMode:   ModeChatOnly,
-		AllowedDir:      defaultWorkspace,
+		AllowedDir:      "", // Empty means use current working directory
 		ContextSize:     10,
 		DBPath:          defaultDBPath,
 		ContainerName:   "liberida-workspace",
@@ -112,6 +112,15 @@ func (c *Config) Validate() error {
 // IsFileOperationAllowed returns true if the agent can perform file operations
 func (c *Config) IsFileOperationAllowed() bool {
 	return c.ExecutionMode != ModeChatOnly
+}
+
+// GetWorkspaceDir returns the effective workspace directory.
+// If AllowedDir is empty, returns the current working directory.
+func (c *Config) GetWorkspaceDir() (string, error) {
+	if c.AllowedDir != "" {
+		return c.AllowedDir, nil
+	}
+	return os.Getwd()
 }
 
 // String returns a string representation of the config
