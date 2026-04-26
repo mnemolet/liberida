@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,7 +18,6 @@ const (
 	// Default values
 	defaultOllamaURL = "http://localhost:11434"
 	defaultModel     = "llama2"
-	defaultWorkspace = "liberida-workspace"
 
 	stepWelcome = iota
 	stepProvider
@@ -27,10 +25,9 @@ const (
 	stepOllamaURL
 	stepModel
 	stepExecMode
-	stepDirectory
 	stepContainerImage
 	stepComplete
-	totalSteps = 8
+	totalSteps = 7
 
 	title = "LiberIda Setup Wizard\n"
 )
@@ -76,7 +73,6 @@ type Model struct {
 	ollamaURL        string
 	model            string
 	execMode         string
-	allowedDir       string
 	containerImage   string
 	configMgr        *config.Manager
 	reader           *bufio.Reader
@@ -96,7 +92,6 @@ func InitialModel(cm *config.Manager) Model {
 		ollamaURL:        existing.OllamaURL,
 		model:            existing.Model,
 		execMode:         string(existing.ExecutionMode),
-		allowedDir:       existing.AllowedDir,
 		containerImage:   existing.ContainerImage,
 		configMgr:        cm,
 		question:         "Welcome to LiberIda Setup!",
@@ -260,27 +255,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.saveConfig()
 					m.step = stepComplete
 					m.completed = true
+				} else if m.execMode == string(config.ModeLocal) {
+					m.saveConfig()
+					m.step = stepComplete
+					m.completed = true
 				} else {
-					m.step = stepDirectory
+					m.step = stepContainerImage
 					m.cursor = 0
-					m.question = "Workspace Directory:"
-					// Get home directory for default
-					home, _ := os.UserHomeDir()
-					defaultDir := filepath.Join(home, defaultWorkspace)
+					m.question = "Container Image:"
 					m.choices = []string{
-						fmt.Sprintf("Use default (%s)", defaultDir),
-						"Enter custom path",
+						"Use default (ubuntu:latest)",
+						"Enter custom image",
 					}
 				}
-			case stepDirectory:
-				home, _ := os.UserHomeDir()
-				if m.cursor == 0 {
-					m.allowedDir = filepath.Join(home, defaultWorkspace)
-				} else {
-					m.allowedDir = filepath.Join(home, defaultWorkspace) // Default for now
-				}
-
-				m.saveConfig()
+			m.saveConfig()
 				m.step = stepComplete
 				m.completed = true
 			}
@@ -297,13 +285,7 @@ func (m *Model) saveConfig() {
 	cfg.Model = m.model
 	cfg.ExecutionMode = config.ExecutionMode(m.execMode)
 	cfg.ContainerImage = m.containerImage
-
-	// Only set AllowedDir if not in chat-only mode
-	if m.execMode == string(config.ModeChatOnly) {
-		cfg.AllowedDir = "" // Clear any existing directory for chat-only mode
-	} else {
-		cfg.AllowedDir = m.allowedDir
-	}
+	cfg.AllowedDir = "" // Use current working directory
 
 	// Set container name for Docker/Podman modes
 	if m.execMode == string(config.ModeDocker) || m.execMode == string(config.ModePodman) {
@@ -363,10 +345,12 @@ func (m Model) renderComplete() string {
 	s.WriteString(fmt.Sprintf("- Model: %s\n", m.model))
 	s.WriteString(fmt.Sprintf("- Execution mode: %s\n", m.execMode))
 
-	if m.execMode != string(config.ModeChatOnly) {
-		s.WriteString(fmt.Sprintf("- Workspace: %s\n", m.allowedDir))
+	if m.execMode == string(config.ModeChatOnly) {
+		s.WriteString("- Working directory: current directory (chat only)\n")
+	} else if m.execMode == string(config.ModeLocal) {
+		s.WriteString("- Working directory: current directory\n")
 	} else {
-		s.WriteString("- Workspace: None (chat only)\n")
+		s.WriteString(fmt.Sprintf("- Container image: %s\n", m.containerImage))
 	}
 
 	s.WriteString("\nPress q to exit.\n")
