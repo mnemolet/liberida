@@ -126,22 +126,29 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 
 	// Create executor based on execution mode
 	var exec executor.Executor
+	var workspaceDir string
 	if cfg.IsFileOperationAllowed() {
+		// Determine workspace directory: use CWD if AllowedDir is not set
+		workspaceDir, err = cfg.GetWorkspaceDir()
+		if err != nil {
+			return fmt.Errorf("failed to determine workspace directory: %w", err)
+		}
+
 		switch cfg.ExecutionMode {
 		case config.ModeLocal:
-			exec, err = executor.NewLocal(cfg.AllowedDir)
+			exec, err = executor.NewLocal(workspaceDir)
 			if err != nil {
 				return fmt.Errorf("failed to initialize local executor: %w", err)
 			}
-			fmt.Printf("File operations allowed in: %s\n", cfg.AllowedDir)
+			fmt.Printf("File operations allowed in: %s\n", workspaceDir)
 
 		case config.ModePodman:
-			exec, err = executor.NewPodman(cfg.ContainerName, cfg.ContainerImage, cfg.AllowedDir)
+			exec, err = executor.NewPodman(cfg.ContainerName, cfg.ContainerImage, workspaceDir)
 			if err != nil {
 				return fmt.Errorf("failed to initialize Podman executor: %w", err)
 			}
 			fmt.Printf("Podman container '%s' ready with image %s\n", cfg.ContainerName, cfg.ContainerImage)
-			fmt.Printf("Workspace mounted at: %s\n", cfg.AllowedDir)
+			fmt.Printf("Workspace mounted at: %s\n", workspaceDir)
 
 		case config.ModeDocker:
 			// For Docker, we'll use the same Podman executor with Docker socket
@@ -166,7 +173,7 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 	if cfg.AutoContext && exec != nil {
 		fmt.Print("Scanning workspace for context...")
 		scanner := workspace.NewWorkspaceScanner()
-		contextStr, err = scanner.CollectContext(exec, cfg.AllowedDir)
+		contextStr, err = scanner.CollectContext(exec, workspaceDir)
 		if err != nil {
 			fmt.Printf("Could not collect workspace context: %v\n", err)
 		} else {
