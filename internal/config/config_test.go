@@ -27,9 +27,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default ContextSize to be 10, got %d", cfg.ContextSize)
 	}
 
-	expectedWorkspace := "/test/home/liberida-workspace"
-	if cfg.AllowedDir != expectedWorkspace {
-		t.Errorf("Expected default AllowedDir to be '%s', got '%s'", expectedWorkspace, cfg.AllowedDir)
+	if cfg.AllowedDir != "" {
+		t.Errorf("Expected default AllowedDir to be empty (use CWD), got '%s'", cfg.AllowedDir)
 	}
 }
 
