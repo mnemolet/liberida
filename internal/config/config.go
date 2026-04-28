@@ -8,17 +8,18 @@ import (
 )
 
 type Config struct {
-	Provider        string `mapstructure:"provider"`
-	OllamaURL       string `mapstructure:"ollama_url"`
-	Model           string `mapstructure:"model"`
-	ContextSize     int    `mapstructure:"context_size"`
-	DBPath          string `mapstructure:"db_path"`
-	OpenAIAPIKey    string `mapstructure:"openai_api_key"`
-	AnthropicAPIKey string `mapstructure:"anthropic_api_key"`
-	GeminiAPIKey    string `mapstructure:"gemini_api_key"`
-	AutoContext     bool   `mapstructure:"auto_context"`
-	AutoTitle       bool   `mapstructure:"auto_title"`
-	ShowUsage       bool   `mapstructure:"show_usage"`
+	Provider         string `mapstructure:"provider"`
+	OllamaURL        string `mapstructure:"ollama_url"`
+	Model            string `mapstructure:"model"`
+	ContextSize      int    `mapstructure:"context_size"`
+	DBPath           string `mapstructure:"db_path"`
+	AutoContext      bool   `mapstructure:"auto_context"`
+	AutoTitle        bool   `mapstructure:"auto_title"`
+	ShowUsage        bool   `mapstructure:"show_usage"`
+	OpenAIAPIKey     string `mapstructure:"openai_api_key"`
+	AnthropicAPIKey  string `mapstructure:"anthropic_api_key"`
+	GeminiAPIKey     string `mapstructure:"gemini_api_key"`
+	OpenRouterAPIKey string `mapstructure:"openrouter_api_key"`
 }
 
 func DefaultConfig(hp HomeDirProvider) *Config {
@@ -26,17 +27,18 @@ func DefaultConfig(hp HomeDirProvider) *Config {
 	defaultDBPath := filepath.Join(home, ".liberida", "chat.db")
 
 	return &Config{
-		Provider:        "ollama",
-		OllamaURL:       "http://localhost:11434",
-		Model:           "llama3.2",
-		ContextSize:     10,
-		DBPath:          defaultDBPath,
-		OpenAIAPIKey:    "",
-		AnthropicAPIKey: "",
-		GeminiAPIKey:    "",
-		AutoContext:     false,
-		AutoTitle:       false,
-		ShowUsage:       true,
+		Provider:         "ollama",
+		OllamaURL:        "http://localhost:11434",
+		Model:            "llama3.2",
+		ContextSize:      10,
+		DBPath:           defaultDBPath,
+		AutoContext:      false,
+		AutoTitle:        false,
+		ShowUsage:        true,
+		OpenAIAPIKey:     "",
+		AnthropicAPIKey:  "",
+		GeminiAPIKey:     "",
+		OpenRouterAPIKey: "",
 	}
 }
 
