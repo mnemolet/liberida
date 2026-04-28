@@ -12,8 +12,8 @@ type Usage struct {
 
 // Chat Message
 type Message struct {
-	Role    string // "user", "assistant", "system"
-	Content string
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 // Request holds parameters for a completion.
