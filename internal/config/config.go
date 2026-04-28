@@ -7,31 +7,18 @@ import (
 	"strings"
 )
 
-type ExecutionMode string
-
-const (
-	ModeChatOnly ExecutionMode = "chat-only"
-	ModeLocal    ExecutionMode = "local"
-	ModeDocker   ExecutionMode = "docker"
-	ModePodman   ExecutionMode = "podman"
-)
-
 type Config struct {
-	Provider        string        `mapstructure:"provider"`
-	OllamaURL       string        `mapstructure:"ollama_url"`
-	Model           string        `mapstructure:"model"`
-	ExecutionMode   ExecutionMode `mapstructure:"execution_mode"`
-	AllowedDir      string        `mapstructure:"allowed_dir"`
-	ContextSize     int           `mapstructure:"context_size"`
-	DBPath          string        `mapstructure:"db_path"`
-	ContainerName   string        `mapstructure:"container_name"`
-	ContainerImage  string        `mapstructure:"container_image"`
-	OpenAIAPIKey    string        `mapstructure:"openai_api_key"`
-	AnthropicAPIKey string        `mapstructure:"anthropic_api_key"`
-	GeminiAPIKey    string        `mapstructure:"gemini_api_key"`
-	AutoContext     bool          `mapstructure:"auto_context"`
-	AutoTitle       bool          `mapstructure:"auto_title"`
-	ShowUsage       bool          `mapstructure:"show_usage"`
+	Provider        string `mapstructure:"provider"`
+	OllamaURL       string `mapstructure:"ollama_url"`
+	Model           string `mapstructure:"model"`
+	ContextSize     int    `mapstructure:"context_size"`
+	DBPath          string `mapstructure:"db_path"`
+	OpenAIAPIKey    string `mapstructure:"openai_api_key"`
+	AnthropicAPIKey string `mapstructure:"anthropic_api_key"`
+	GeminiAPIKey    string `mapstructure:"gemini_api_key"`
+	AutoContext     bool   `mapstructure:"auto_context"`
+	AutoTitle       bool   `mapstructure:"auto_title"`
+	ShowUsage       bool   `mapstructure:"show_usage"`
 }
 
 func DefaultConfig(hp HomeDirProvider) *Config {
@@ -41,18 +28,14 @@ func DefaultConfig(hp HomeDirProvider) *Config {
 	return &Config{
 		Provider:        "ollama",
 		OllamaURL:       "http://localhost:11434",
-		Model:           "llama2",
-		ExecutionMode:   ModeChatOnly,
-		AllowedDir:      "", // Empty means use current working directory
+		Model:           "llama3.2",
 		ContextSize:     10,
 		DBPath:          defaultDBPath,
-		ContainerName:   "liberida-workspace",
-		ContainerImage:  "alpine:latest",
 		OpenAIAPIKey:    "",
 		AnthropicAPIKey: "",
 		GeminiAPIKey:    "",
-		AutoContext:     true,
-		AutoTitle:       true,
+		AutoContext:     false,
+		AutoTitle:       false,
 		ShowUsage:       true,
 	}
 }
@@ -83,64 +66,31 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("model is required")
 	}
 
-	// Only validate AllowedDir if not in chat-only mode
-	if c.ExecutionMode != ModeChatOnly && c.AllowedDir == "" {
-		return fmt.Errorf("allowed directory is required for %s mode", c.ExecutionMode)
-	}
-
-	// Validate execution mode
-	switch c.ExecutionMode {
-	case ModeLocal, ModeDocker, ModePodman, ModeChatOnly:
-		// valid
-	default:
-		return fmt.Errorf("invalid execution mode: %s", c.ExecutionMode)
-	}
-
-	// Validate container-specific fields for Docker/Podman modes
-	if c.ExecutionMode == ModeDocker || c.ExecutionMode == ModePodman {
-		if c.ContainerName == "" {
-			return fmt.Errorf("container name is required for %s mode", c.ExecutionMode)
-		}
-		if c.ContainerImage == "" {
-			return fmt.Errorf("container image is required for %s mode", c.ExecutionMode)
-		}
-	}
-
 	return nil
-}
-
-// IsFileOperationAllowed returns true if the agent can perform file operations
-func (c *Config) IsFileOperationAllowed() bool {
-	return c.ExecutionMode != ModeChatOnly
 }
 
 // GetWorkspaceDir returns the effective workspace directory.
 // If AllowedDir is empty, returns the current working directory.
 func (c *Config) GetWorkspaceDir() (string, error) {
-	if c.AllowedDir != "" {
-		return c.AllowedDir, nil
-	}
 	return os.Getwd()
 }
 
 // String returns a string representation of the config
 func (c *Config) String() string {
-	modeStr := string(c.ExecutionMode)
-	if c.ExecutionMode == ModeChatOnly {
-		modeStr = "chat-only (no file access)"
-	}
-
 	return fmt.Sprintf(`Configuration:
   Provider: %s
   Ollama URL: %s
   Model: %s
-  Execution Mode: %s
   Context Size: %d
-  File Operations: %v`,
+  Auto Context: %v
+  Auto Title: %v
+  Show Usage: %v`,
 		c.Provider,
 		c.OllamaURL,
 		c.Model,
-		modeStr,
 		c.ContextSize,
-		c.IsFileOperationAllowed())
+		c.AutoContext,
+		c.AutoTitle,
+		c.ShowUsage,
+	)
 }
