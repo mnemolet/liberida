@@ -14,19 +14,30 @@ var rootCmd = &cobra.Command{
 	Short:   "LiberIda - local AI Agent",
 	Long:    `CLI LiberIda AI agent that runs locally using Ollama.`,
 	Version: version.Short(),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		manager := config.NewManager()
-		manager.Load()
+		if err := manager.Load(); err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
 		cfg := manager.Get()
 
-		fmt.Println("LiberIda is ready!")
-		fmt.Printf("Provider: %s\n", cfg.Provider)
-		fmt.Printf("Using model: %s\n", cfg.Model)
-		fmt.Printf("Working dir: %s\n", cfg.AllowedDir)
+		prov, err := createProvider(cfg)
+		if err != nil {
+			return err
+		}
+
+		sessionID, _ := cmd.Flags().GetUint("session")
+		forceNew, _ := cmd.Flags().GetBool("new")
+		noContext, _ := cmd.Flags().GetBool("no-context")
+		if noContext {
+			cfg.AutoContext = false
+		}
+
+		return runChatSession(prov, cfg, sessionID, forceNew)
 	},
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
+// Execute adds all child commands to the root command.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -35,5 +46,7 @@ func Execute() {
 }
 
 func init() {
-	// For Global flags
+	rootCmd.PersistentFlags().Uint("session", 0, "Resume existing session by ID")
+	rootCmd.PersistentFlags().Bool("new", false, "Force create new session (ignore --session)")
+	rootCmd.PersistentFlags().Bool("no-context", false, "Disable automatic workspace context")
 }

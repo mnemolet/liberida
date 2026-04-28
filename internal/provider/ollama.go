@@ -34,21 +34,23 @@ func (p *OllamaProvider) Name() string {
 }
 
 // ---------- Request/Response Structs for Ollama API ----------
-
-type ollamaGenerateRequest struct {
-	Model   string                 `json:"model"`
-	Prompt  string                 `json:"prompt"`
-	Stream  bool                   `json:"stream"`
-	Context []int                  `json:"context,omitempty"`
-	Options map[string]interface{} `json:"options,omitempty"`
+// replace ollamaGenerateRequest and ollamaGenerateResponse with:
+type ollamaChatRequest struct {
+	Model    string                 `json:"model"`
+	Messages []ollamaChatMessage    `json:"messages"`
+	Stream   bool                   `json:"stream"`
+	Options  map[string]interface{} `json:"options,omitempty"`
 }
 
-type ollamaGenerateResponse struct {
-	Response        string `json:"response"`
-	Context         []int  `json:"context"`
-	Done            bool   `json:"done"`
-	PromptEvalCount int    `json:"prompt_eval_count"`
-	EvalCount       int    `json:"eval_count"`
+type ollamaChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type ollamaChatResponse struct {
+	Message struct {
+		Content string `json:"content"`
+	} `json:"message"`
 }
 
 type ollamaTagsResponse struct {
@@ -57,32 +59,32 @@ type ollamaTagsResponse struct {
 	} `json:"models"`
 }
 
-// messagesToPrompt converts a list of messages into a simple prompt.
-// For Ollama, we can format as "role: content\n" or use chat templates.
-// This is a simplistic approach; for better results, consider using
-// chat templates based on the model.
-func messagesToPrompt(messages []Message) string {
-	var sb strings.Builder
-	for _, msg := range messages {
-		sb.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
-	}
-	return sb.String()
+type ollamaChatStreamResponse struct {
+	Message struct {
+		Content string `json:"content"`
+	} `json:"message"`
+	Done            bool `json:"done"`
+	PromptEvalCount int  `json:"prompt_eval_count"`
+	EvalCount       int  `json:"eval_count"`
 }
 
-// Complete sends a non-streaming request to Ollama.
+// Complete sends a non-streaming request to Ollama using chat API.
 func (p *OllamaProvider) Complete(ctx context.Context, req Request) (*Response, error) {
-	// Use request model if specified, otherwise fallback to provider default
 	model := req.Model
 	if model == "" {
 		model = p.model
 	}
 
-	prompt := messagesToPrompt(req.Messages)
+	// Convert internal messages to Ollama chat messages
+	chatMessages := make([]ollamaChatMessage, len(req.Messages))
+	for i, msg := range req.Messages {
+		chatMessages[i] = ollamaChatMessage{Role: msg.Role, Content: msg.Content}
+	}
 
-	ollamaReq := ollamaGenerateRequest{
-		Model:  model,
-		Prompt: prompt,
-		Stream: false,
+	ollamaReq := ollamaChatRequest{
+		Model:    model,
+		Messages: chatMessages,
+		Stream:   false,
 	}
 	if req.Temperature != 0 {
 		ollamaReq.Options = map[string]interface{}{
@@ -95,7 +97,7 @@ func (p *OllamaProvider) Complete(ctx context.Context, req Request) (*Response, 
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	url := p.baseURL + "/api/generate"
+	url := p.baseURL + "/api/chat" // changed from /api/generate
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -112,35 +114,38 @@ func (p *OllamaProvider) Complete(ctx context.Context, req Request) (*Response, 
 		return nil, fmt.Errorf("ollama API returned status %d", resp.StatusCode)
 	}
 
-	var ollamaResp ollamaGenerateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
+	var chatResp ollamaChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	return &Response{
-		Content: ollamaResp.Response,
+		Content: chatResp.Message.Content,
 		Usage: Usage{
-			PromptTokens:     ollamaResp.PromptEvalCount,
-			CompletionTokens: ollamaResp.EvalCount,
-			TotalTokens:      ollamaResp.PromptEvalCount + ollamaResp.EvalCount,
-			EstimatedCost:    0.0, // Free
+			// Ollama chat API doesn't return token counts in non-streaming mode easily
+			// You can ignore or try to get from another endpoint
+			EstimatedCost: 0.0,
 		},
 	}, nil
 }
 
-// Stream sends a streaming request and returns a channel of strings.
+// Stream sends a streaming request using chat API.
 func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
 	model := req.Model
 	if model == "" {
 		model = p.model
 	}
 
-	prompt := messagesToPrompt(req.Messages)
+	// Convert internal messages to Ollama chat messages
+	chatMessages := make([]ollamaChatMessage, len(req.Messages))
+	for i, msg := range req.Messages {
+		chatMessages[i] = ollamaChatMessage{Role: msg.Role, Content: msg.Content}
+	}
 
-	ollamaReq := ollamaGenerateRequest{
-		Model:  model,
-		Prompt: prompt,
-		Stream: true,
+	ollamaReq := ollamaChatRequest{
+		Model:    model,
+		Messages: chatMessages,
+		Stream:   true,
 	}
 	if req.Temperature != 0 {
 		ollamaReq.Options = map[string]interface{}{
@@ -152,8 +157,9 @@ func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
+	// fmt.Printf("[DEBUG] Ollama request: %s\n", string(data))
 
-	url := p.baseURL + "/api/generate"
+	url := p.baseURL + "/api/chat" // changed
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create request: %w", err)
@@ -166,62 +172,54 @@ func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// bodyBytes, _ := io.ReadAll(resp.Body)
+		// fmt.Printf("[DEBUG] Ollama error response: %s\n", string(bodyBytes))
 		resp.Body.Close()
 		return nil, nil, fmt.Errorf("ollama API returned status %d", resp.StatusCode)
 	}
 
 	chunkChan := make(chan string)
-	usageChan := make(chan Usage, 1) // Buffered channel to prevent blocking
+	usageChan := make(chan Usage, 1)
 
 	go func() {
 		defer resp.Body.Close()
 		defer close(chunkChan)
 		defer close(usageChan)
 
-		scanner := bufio.NewScanner(resp.Body)
 		var finalUsage *Usage
 
+		scanner := bufio.NewScanner(resp.Body)
+		// For streaming, Ollama sends one JSON object per line, each with a "message" field.
 		for scanner.Scan() {
 			line := scanner.Text()
 			if line == "" {
 				continue
 			}
-
-			var ollamaResp ollamaGenerateResponse
-			if err := json.Unmarshal([]byte(line), &ollamaResp); err != nil {
+			// fmt.Printf("[DEBUG] Raw line: %s\n", line)
+			var streamResp ollamaChatStreamResponse
+			if err := json.Unmarshal([]byte(line), &streamResp); err != nil {
+				// fmt.Printf("[DEBUG] JSON parse error: %v\n", err)
 				continue
 			}
-
-			// Send the response chunk
-			select {
-			case <-ctx.Done():
-				return
-			case chunkChan <- ollamaResp.Response:
+			if streamResp.Message.Content != "" {
+				select {
+				case <-ctx.Done():
+					return
+				case chunkChan <- streamResp.Message.Content:
+				}
 			}
-
-			// If this is the final response, capture usage
-			if ollamaResp.Done {
+			if streamResp.Done {
 				finalUsage = &Usage{
-					PromptTokens:     ollamaResp.PromptEvalCount,
-					CompletionTokens: ollamaResp.EvalCount,
-					TotalTokens:      ollamaResp.PromptEvalCount + ollamaResp.EvalCount,
+					PromptTokens:     streamResp.PromptEvalCount,
+					CompletionTokens: streamResp.EvalCount,
+					TotalTokens:      streamResp.PromptEvalCount + streamResp.EvalCount,
 					EstimatedCost:    0.0,
 				}
 				break
 			}
 		}
-
-		// Send usage after loop completes
 		if finalUsage != nil {
-			select {
-			case <-ctx.Done():
-				return
-			case usageChan <- *finalUsage:
-			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			// Optionally log error
+			usageChan <- *finalUsage
 		}
 	}()
 

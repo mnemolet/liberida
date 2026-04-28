@@ -20,6 +20,7 @@ type FileInfo struct {
 type WorkspaceScanner struct {
 	maxFileSize int64           // maximum size for text files to include (bytes)
 	extensions  map[string]bool // allowed file extensions
+	excludes    []string
 }
 
 // NewWorkspaceScanner creates a new workspace scanner with defaults
@@ -44,7 +45,27 @@ func NewWorkspaceScanner() *WorkspaceScanner {
 			".gitignore":    true,
 			".dockerignore": true,
 		},
+		excludes: []string{".git", "node_modules", ".DS_Store", "*.log"},
 	}
+}
+
+// AddExclude adds a pattern to skip (e.g., "tmp", "*.bin")
+func (s *WorkspaceScanner) AddExclude(pattern string) {
+	s.excludes = append(s.excludes, pattern)
+}
+
+// shouldExclude checks if a file path matches any exclude pattern
+func (s *WorkspaceScanner) shouldExclude(path string) bool {
+	base := filepath.Base(path)
+	for _, pattern := range s.excludes {
+		if matched, _ := filepath.Match(pattern, base); matched {
+			return true
+		}
+		if strings.Contains(path, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetMaxFileSize sets the maximum file size to include
@@ -88,6 +109,10 @@ func (s *WorkspaceScanner) CollectContext(exec executor.Executor, workspaceDir s
 	var largeFiles []string
 
 	for _, file := range files {
+		if s.shouldExclude(file) {
+			continue
+		}
+
 		// Skip directories and hidden files
 		if strings.HasPrefix(filepath.Base(file), ".") {
 			continue

@@ -13,6 +13,9 @@ LDFLAGS += -X github.com/mnemolet/liberida/internal/version.BuiltBy=$(BUILT_BY)
 # Binary name
 BINARY = liberida
 
+# Build directory
+BUILD_DIR = bin
+
 # Default target
 .PHONY: all
 all: test build
@@ -35,7 +38,7 @@ test-coverage:
 
 .PHONY: build
 build:
-	go build -ldflags "$(LDFLAGS)" -o build/$(BINARY) ./cli
+	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cli
 
 .PHONY: install
 install:
@@ -43,7 +46,7 @@ install:
 
 .PHONY: clean
 clean:
-	rm -rf build/
+	rm -rf $(BUILD_DIR)/
 
 .PHONY: version
 version:

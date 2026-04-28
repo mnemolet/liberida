@@ -59,9 +59,6 @@ func TestManagerSaveAndLoad(t *testing.T) {
 	cfg := manager.Get()
 	cfg.OllamaURL = "http://test:11434"
 	cfg.Model = "test-model"
-	cfg.ExecutionMode = ModeLocal
-	cfg.AllowedDir = "/test/dir"
-	cfg.ContainerName = "test-container"
 	cfg.ContextSize = 20
 
 	err := manager.Save()
@@ -88,15 +85,6 @@ func TestManagerSaveAndLoad(t *testing.T) {
 	if loadedCfg.Model != "test-model" {
 		t.Errorf("Loaded Model = %s, want test-model", loadedCfg.Model)
 	}
-	if loadedCfg.ExecutionMode != ModeLocal {
-		t.Errorf("Loaded ExecutionMode = %s, want local", loadedCfg.ExecutionMode)
-	}
-	if loadedCfg.AllowedDir != "/test/dir" {
-		t.Errorf("Loaded AllowedDir = %s, want /test/dir", loadedCfg.AllowedDir)
-	}
-	if loadedCfg.ContainerName != "test-container" {
-		t.Errorf("Loaded ContainerName = %s, want test-container", loadedCfg.ContainerName)
-	}
 	if loadedCfg.ContextSize != 20 {
 		t.Errorf("Loaded ContextSize = %d, want 20", loadedCfg.ContextSize)
 	}
@@ -122,7 +110,6 @@ func TestManagerUpdateFromMap(t *testing.T) {
 	updates := map[string]interface{}{
 		"ollama_url":     "http://updated:11434",
 		"model":          "updated-model",
-		"execution_mode": string(ModeDocker),
 		"allowed_dir":    "/updated/dir",
 		"container_name": "updated-container",
 		"context_size":   30,
@@ -140,15 +127,6 @@ func TestManagerUpdateFromMap(t *testing.T) {
 	if cfg.Model != "updated-model" {
 		t.Errorf("Updated Model = %s, want updated-model", cfg.Model)
 	}
-	if cfg.ExecutionMode != ModeDocker {
-		t.Errorf("Updated ExecutionMode = %s, want docker", cfg.ExecutionMode)
-	}
-	if cfg.AllowedDir != "/updated/dir" {
-		t.Errorf("Updated AllowedDir = %s, want /updated/dir", cfg.AllowedDir)
-	}
-	if cfg.ContainerName != "updated-container" {
-		t.Errorf("Updated ContainerName = %s, want updated-container", cfg.ContainerName)
-	}
 	if cfg.ContextSize != 30 {
 		t.Errorf("Updated ContextSize = %d, want 30", cfg.ContextSize)
 	}
@@ -163,7 +141,6 @@ func TestManagerReset(t *testing.T) {
 	cfg := manager.Get()
 	cfg.OllamaURL = "http://modified:11434"
 	cfg.Model = "modified"
-	cfg.ExecutionMode = ModeDocker
 
 	manager.Reset()
 
@@ -176,9 +153,6 @@ func TestManagerReset(t *testing.T) {
 	}
 	if resetCfg.Model != defaultCfg.Model {
 		t.Errorf("After reset Model = %s, want %s", resetCfg.Model, defaultCfg.Model)
-	}
-	if resetCfg.ExecutionMode != defaultCfg.ExecutionMode {
-		t.Errorf("After reset ExecutionMode = %s, want %s", resetCfg.ExecutionMode, defaultCfg.ExecutionMode)
 	}
 }
 

@@ -18,8 +18,6 @@ var showConfigCmd = &cobra.Command{
 		fmt.Printf("Provider: %s\n", cfg.Provider)
 		fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
 		fmt.Printf("Model: %s\n", cfg.Model)
-		fmt.Printf("Execution mode: %s\n", cfg.ExecutionMode)
-		fmt.Printf("Allowed Dir: %s\n", cfg.AllowedDir)
 		fmt.Printf("Context size: %v\n", cfg.ContextSize)
 		return nil
 	},

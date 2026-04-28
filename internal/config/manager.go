@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 
@@ -48,22 +47,18 @@ func (m *Manager) Load() error {
 	m.viper.SetDefault("provider", m.config.Provider)
 	m.viper.SetDefault("ollama_url", m.config.OllamaURL)
 	m.viper.SetDefault("model", m.config.Model)
-	m.viper.SetDefault("execution_mode", string(m.config.ExecutionMode))
-	m.viper.SetDefault("allowed_dir", m.config.AllowedDir)
 	m.viper.SetDefault("context_size", m.config.ContextSize)
-	m.viper.SetDefault("container_name", m.config.ContainerName)
-	m.viper.SetDefault("container_image", m.config.ContainerImage)
 	m.viper.SetDefault("openai_api_key", m.config.OpenAIAPIKey)
 	m.viper.SetDefault("anthropic_api_key", m.config.AnthropicAPIKey)
 	m.viper.SetDefault("gemini_api_key", m.config.GeminiAPIKey)
 	m.viper.SetDefault("auto_context", m.config.AutoContext)
+	m.viper.SetDefault("auto_title", m.config.AutoTitle)
 
 	// Try to read existing config file
 	if err := m.viper.ReadInConfig(); err != nil {
-		// Use errors.As to handle wrapped errors
-		var configNotFoundError viper.ConfigFileNotFoundError
-		if errors.As(err, &configNotFoundError) {
-			return nil // Config file not found is not an error
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// No config file found: create default one
+			return m.Save() // Save defaults to disk
 		}
 		return err
 	}
@@ -81,15 +76,12 @@ func (m *Manager) Save() error {
 	m.viper.Set("provider", m.config.Provider)
 	m.viper.Set("ollama_url", m.config.OllamaURL)
 	m.viper.Set("model", m.config.Model)
-	m.viper.Set("execution_mode", string(m.config.ExecutionMode))
-	m.viper.Set("allowed_dir", m.config.AllowedDir)
 	m.viper.Set("context_size", m.config.ContextSize)
-	m.viper.Set("container_name", m.config.ContainerName)
-	m.viper.Set("container_image", m.config.ContainerImage)
 	m.viper.Set("openai_api_key", m.config.OpenAIAPIKey)
 	m.viper.Set("anthropic_api_key", m.config.AnthropicAPIKey)
 	m.viper.Set("gemini_api_key", m.config.GeminiAPIKey)
 	m.viper.Set("auto_context", m.config.AutoContext)
+	m.viper.Set("auto_title", m.config.AutoTitle)
 
 	configFile := filepath.Join(m.configPath, defaultConfig)
 	return m.viper.WriteConfigAs(configFile)
