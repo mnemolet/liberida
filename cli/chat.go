@@ -18,43 +18,9 @@ import (
 	"github.com/mnemolet/liberida/internal/executor"
 	"github.com/mnemolet/liberida/internal/llm"
 	"github.com/mnemolet/liberida/internal/provider"
-	"github.com/spf13/cobra"
 )
 
 var autoContextFlag bool
-
-var chatCmd = &cobra.Command{
-	Use:   "chat",
-	Short: "Start an interactive chat session",
-	Long:  "Start an interactive chat session with the configured AI provider.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Get session ID from flag
-		sessionID, _ := cmd.Flags().GetUint("session")
-		newSession, _ := cmd.Flags().GetBool("new")
-
-		manager := config.NewManager()
-		if err := manager.Load(); err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-		cfg := manager.Get()
-
-		// Create Provider
-		prov, err := createProvider(cfg)
-		if err != nil {
-			return err
-		}
-
-		// Start chat session
-		return runChatSession(prov, cfg, sessionID, newSession)
-	},
-}
-
-func init() {
-	chatCmd.Flags().Uint("session", 0, "Resume existing session by ID")
-	chatCmd.Flags().Bool("new", false, "Force create new session (ignore --session)")
-	chatCmd.Flags().Bool("no-context", false, "Disable automatic workspace context")
-	rootCmd.AddCommand(chatCmd)
-}
 
 func createProvider(cfg *config.Config) (provider.Provider, error) {
 	switch cfg.Provider {
@@ -124,44 +90,20 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 		fmt.Println("New session will be created when you send your first message.")
 	}
 
-	// Create executor based on execution mode
-	var exec executor.Executor
-	var workspaceDir string
-	if cfg.IsFileOperationAllowed() {
-		// Determine workspace directory: use CWD if AllowedDir is not set
-		workspaceDir, err = cfg.GetWorkspaceDir()
-		if err != nil {
-			return fmt.Errorf("failed to determine workspace directory: %w", err)
-		}
-
-		switch cfg.ExecutionMode {
-		case config.ModeLocal:
-			exec, err = executor.NewLocal(workspaceDir)
-			if err != nil {
-				return fmt.Errorf("failed to initialize local executor: %w", err)
-			}
-			fmt.Printf("File operations allowed in: %s\n", workspaceDir)
-
-		case config.ModePodman:
-			exec, err = executor.NewPodman(cfg.ContainerName, cfg.ContainerImage, workspaceDir)
-			if err != nil {
-				return fmt.Errorf("failed to initialize Podman executor: %w", err)
-			}
-			fmt.Printf("Podman container '%s' ready with image %s\n", cfg.ContainerName, cfg.ContainerImage)
-			fmt.Printf("Workspace mounted at: %s\n", workspaceDir)
-
-		case config.ModeDocker:
-			// For Docker, we'll use the same Podman executor with Docker socket
-			// For now, return error until Docker executor is implemented
-			return fmt.Errorf("Docker mode not yet implemented, please use Podman")
-
-		default:
-			return fmt.Errorf("unsupported execution mode: %s", cfg.ExecutionMode)
-		}
-		defer exec.Close()
-	} else {
-		fmt.Println("File operations are disabled (chat-only mode).")
+	// Determine workspace directory (current working directory)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
 	}
+	workspaceDir := cwd
+
+	// Create local executor
+	exec, err := executor.NewLocal(workspaceDir)
+	if err != nil {
+		return fmt.Errorf("failed to initialize local executor: %w", err)
+	}
+	defer exec.Close()
+	fmt.Printf("File operations allowed in: %s\n", workspaceDir)
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -169,6 +111,7 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 	messages := make([]provider.Message, 0)
 
 	// Collect workspace context if enabled
+	// TODO: need to fix!
 	var contextStr string
 	if cfg.AutoContext && exec != nil {
 		fmt.Print("Scanning workspace for context...")
@@ -178,29 +121,22 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 			fmt.Printf("Could not collect workspace context: %v\n", err)
 		} else {
 			fmt.Println("Done")
+			// Truncate if too long
+			const maxContextLength = 500
+			if len(contextStr) > maxContextLength {
+				contextStr = contextStr[:maxContextLength] + "\n... (truncated)"
+			}
 		}
 	}
 
 	// System message with mode-appropriate instructions
 	var systemMsg provider.Message
-	if exec != nil {
-		// Check if executor supports command execution (for exec action)
-		supportsExec := cfg.ExecutionMode == config.ModePodman || cfg.ExecutionMode == config.ModeDocker
 
-		execInstructions := ""
-		if supportsExec {
-			execInstructions = `
-{"type":"exec","command":["ls","-la"]}  // runs a command in the container
-{"type":"exec","command":["echo","hello"]}`
-		}
-
-		systemMsgContent := fmt.Sprint(`You are a helpful AI assistant. 
+	systemMsgContent := fmt.Sprint(`You are a helpful AI assistant. 
 You can answer questions and also perform file operations when asked.
 CRITICAL INSTRUCTION:
 - For NORMAL questions: Respond with plain text, just like a normal conversation
-- For FILE OPERATIONS: Output a single JSON object on its own line
 - Never output JSON for normal questions
-- Never output {"type":"none"} or any other JSON unless performing file operations
 - Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
 
 NORMAL CONVERSATION EXAMPLE (what you should do 99% of the time):
@@ -210,50 +146,15 @@ You: Python is a high-level, interpreted programming language known for its simp
 User: "Explain variables"
 You: A variable is a container for storing data values...
 User: "who are you?"
-You: I'm an AI assistant that can help you with programming and general questions...
+You: I'm an AI assistant that can help you with programming and general questions...`)
 
-FILE OPERATION EXAMPLES (only when user explicitly asks for file operations):
-User: "List my files"
-You: {"type":"list"}
+	if contextStr != "" {
+		systemMsgContent = fmt.Sprintf("%s\n\n%s", systemMsgContent, contextStr)
+	}
 
-User: "Create a file called test.txt"
-You: {"type":"write","path":"test.txt","content":"your content here"}
-
-User: "Read config.json"
-You: {"type":"read","path":"config.json"}
-
-User: "Delete temp.log"
-You: {"type":"delete","path":"temp.log"}
-
-REMEMBER:
-- Answer questions with helpful text responses
-- Use JSON ONLY for file operations
-- Never use JSON for conversation
-
-To perform a file operation, output a JSON object on its own line with the following format:
-{"type":"write","path":"filename.txt","content":"file content"}
-{"type":"read","path":"filename.txt"}
-{"type":"delete","path":"filename.txt"}
-{"type":"list"}  // lists all files in workspace
-Only use relative paths. Do not use absolute paths. Do not include any other text with the JSON.`,
-			execInstructions)
-		// Add workspace context if available
-		if contextStr != "" {
-			systemMsgContent = fmt.Sprintf("%s\n\n%s", systemMsgContent, contextStr)
-		}
-
-		systemMsg = provider.Message{
-			Role:    "system",
-			Content: systemMsgContent,
-		}
-	} else {
-		systemMsg = provider.Message{
-			Role: "system",
-			Content: `You are an AI assistant in chat-only mode. 
-IMPORTANT: Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
-
-You cannot create, read, modify, or delete files. Do not suggest file operations or pretend to execute them. Simply answer questions and chat with the user.`,
-		}
+	systemMsg = provider.Message{
+		Role:    "system",
+		Content: systemMsgContent,
 	}
 	messages = append(messages, systemMsg)
 
@@ -336,6 +237,10 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 		}
 
 		fmt.Print("AI: ")
+		// fmt.Printf("\n[DEBUG] Sending %d messages to Ollama\n", len(reqMessages))
+		// for i, m := range reqMessages {
+		// 	fmt.Printf("[DEBUG] Message %d: role=%s, content preview=%s\n", i, m.Role, truncateString(m.Content, 50))
+		// }
 		chunkChan, usageChan, err := prov.Stream(ctx, req)
 		if err != nil {
 			fmt.Printf("\nError: %v\n", err)
@@ -391,6 +296,7 @@ You cannot create, read, modify, or delete files. Do not suggest file operations
 
 		// Clean the AI response
 		rawResponse := fullResponse.String()
+		// fmt.Printf("RAW response: %s\n", rawResponse)
 		cleanedResponse := cleanAIResponse(rawResponse)
 
 		// Save cleaned AI response to database
