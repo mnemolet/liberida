@@ -10,6 +10,15 @@ func NewProvider(providerType, ollamaURL, model, apiKey string) (Provider, error
 	case "ollama":
 		return NewOllamaProvider(ollamaURL, model), nil
 
+	case "openrouter":
+		if apiKey == "" {
+			return nil, fmt.Errorf("OpenRouter API key is required. Get one from https://openrouter.ai/keys")
+		}
+		if model == "" {
+			model = "qwen/qwen3-coder:free"
+		}
+		return NewOpenRouterProvider(apiKey, model), nil
+
 	case "openai":
 		if apiKey == "" {
 			return nil, fmt.Errorf("OpenAI API key is required. Get one from https://platform.openai.com/api-keys")

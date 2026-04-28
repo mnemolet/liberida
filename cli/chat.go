@@ -26,6 +26,8 @@ func createProvider(cfg *config.Config) (provider.Provider, error) {
 	switch cfg.Provider {
 	case "ollama":
 		return provider.NewOllamaProvider(cfg.OllamaURL, cfg.Model), nil
+	case "openrouter":
+		return provider.NewProvider("openrouter", "", cfg.Model, cfg.OpenRouterAPIKey)
 	case "openai":
 		return provider.NewProvider("openai", "", cfg.Model, cfg.OpenAIAPIKey)
 	case "anthropic":

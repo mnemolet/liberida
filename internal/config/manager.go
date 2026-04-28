@@ -48,11 +48,12 @@ func (m *Manager) Load() error {
 	m.viper.SetDefault("ollama_url", m.config.OllamaURL)
 	m.viper.SetDefault("model", m.config.Model)
 	m.viper.SetDefault("context_size", m.config.ContextSize)
+	m.viper.SetDefault("auto_context", m.config.AutoContext)
+	m.viper.SetDefault("auto_title", m.config.AutoTitle)
 	m.viper.SetDefault("openai_api_key", m.config.OpenAIAPIKey)
 	m.viper.SetDefault("anthropic_api_key", m.config.AnthropicAPIKey)
 	m.viper.SetDefault("gemini_api_key", m.config.GeminiAPIKey)
-	m.viper.SetDefault("auto_context", m.config.AutoContext)
-	m.viper.SetDefault("auto_title", m.config.AutoTitle)
+	m.viper.SetDefault("openrouter_api_key", m.config.OpenRouterAPIKey)
 
 	// Try to read existing config file
 	if err := m.viper.ReadInConfig(); err != nil {
