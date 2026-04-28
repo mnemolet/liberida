@@ -15,20 +15,12 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default OllamaURL to be 'http://localhost:11434', got %s", cfg.OllamaURL)
 	}
 
-	if cfg.Model != "llama2" {
-		t.Errorf("Expected default Model to be 'llama2', got %s", cfg.Model)
-	}
-
-	if cfg.ExecutionMode != ModeChatOnly {
-		t.Errorf("Expected default ExecutionMode to be 'chat-only', got %s", cfg.ExecutionMode)
+	if cfg.Model != "llama3.2" {
+		t.Errorf("Expected default Model to be 'llama3.2', got %s", cfg.Model)
 	}
 
 	if cfg.ContextSize != 10 {
 		t.Errorf("Expected default ContextSize to be 10, got %d", cfg.ContextSize)
-	}
-
-	if cfg.AllowedDir != "" {
-		t.Errorf("Expected default AllowedDir to be empty (use CWD), got '%s'", cfg.AllowedDir)
 	}
 }
 
@@ -93,74 +85,46 @@ func TestConfigValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "Valid chat-only config",
+			name: "Valid Ollama config",
 			config: &Config{
-				Provider:      "ollama",
-				OllamaURL:     "http://localhost:11434",
-				Model:         "llama2",
-				ExecutionMode: ModeChatOnly,
-				AllowedDir:    "",
+				Provider:  "ollama",
+				OllamaURL: "http://localhost:11434",
+				Model:     "llama3.2",
 			},
 			wantErr: false,
 		},
 		{
-			name: "Valid local config with dir",
+			name: "Valid OpenAI config (API key can be empty, validation only checks provider existence)",
 			config: &Config{
-				Provider:      "ollama",
-				OllamaURL:     "http://localhost:11434",
-				Model:         "llama2",
-				ExecutionMode: ModeLocal,
-				AllowedDir:    "/home/test/workspace",
+				Provider:     "openai",
+				Model:        "gpt-4o",
+				OpenAIAPIKey: "",
 			},
-			wantErr: false,
+			wantErr: false, // We don't validate API key presence here
 		},
 		{
 			name: "Invalid - missing Ollama URL",
 			config: &Config{
-				Provider:      "ollama",
-				OllamaURL:     "",
-				Model:         "llama2",
-				ExecutionMode: ModeChatOnly,
+				Provider:  "ollama",
+				OllamaURL: "",
+				Model:     "llama3.2",
 			},
 			wantErr: true,
 		},
 		{
 			name: "Invalid - missing model",
 			config: &Config{
-				Provider:      "ollama",
-				OllamaURL:     "http://localhost:11434",
-				Model:         "",
-				ExecutionMode: ModeChatOnly,
-			},
-			wantErr: true,
-		},
-		{
-			name: "Invalid - local mode missing dir",
-			config: &Config{
-				Provider:      "ollama",
-				OllamaURL:     "http://localhost:11434",
-				Model:         "llama2",
-				ExecutionMode: ModeLocal,
-				AllowedDir:    "",
-			},
-			wantErr: true,
-		},
-		{
-			name: "Invalid - unknown execution mode",
-			config: &Config{
-				Provider:      "ollama",
-				OllamaURL:     "http://localhost:11434",
-				Model:         "llama2",
-				ExecutionMode: "invalid",
+				Provider:  "ollama",
+				OllamaURL: "http://localhost:11434",
+				Model:     "",
 			},
 			wantErr: true,
 		},
 		{
 			name: "Invalid - missing provider",
 			config: &Config{
-				OllamaURL:     "http://localhost:11434",
-				Model:         "llama2",
-				ExecutionMode: ModeChatOnly,
+				OllamaURL: "http://localhost:11434",
+				Model:     "llama3.2",
 			},
 			wantErr: true,
 		},
@@ -176,35 +140,15 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-func TestIsFileOperationAllowed(t *testing.T) {
-	tests := []struct {
-		name     string
-		mode     ExecutionMode
-		expected bool
-	}{
-		{"Chat-only mode", ModeChatOnly, false},
-		{"Local mode", ModeLocal, true},
-		{"Docker mode", ModeDocker, true},
-		{"Podman mode", ModePodman, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{ExecutionMode: tt.mode}
-			result := cfg.IsFileOperationAllowed()
-			if result != tt.expected {
-				t.Errorf("IsFileOperationAllowed() for %s = %v, want %v", tt.mode, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestConfigString(t *testing.T) {
 	cfg := &Config{
-		OllamaURL:     "http://localhost:11434",
-		Model:         "llama2",
-		ExecutionMode: ModeChatOnly,
-		ContextSize:   10,
+		Provider:    "ollama",
+		OllamaURL:   "http://localhost:11434",
+		Model:       "llama3.2",
+		ContextSize: 10,
+		AutoContext: true,
+		AutoTitle:   true,
+		ShowUsage:   true,
 	}
 
 	str := cfg.String()
@@ -212,14 +156,20 @@ func TestConfigString(t *testing.T) {
 		t.Error("Expected non-empty string representation")
 	}
 
-	// Check if it contains key information
-	if !strings.Contains(str, "http://localhost:11434") {
-		t.Error("String representation missing Ollama URL")
+	// Check for key information that should be present
+	checks := []string{
+		"Provider: ollama",
+		"Ollama URL: http://localhost:11434",
+		"Model: llama3.2",
+		"Context Size: 10",
+		"Auto Context: true",
+		"Auto Title: true",
+		"Show Usage: true",
 	}
-	if !strings.Contains(str, "llama2") {
-		t.Error("String representation missing model")
-	}
-	if !strings.Contains(str, "chat-only") {
-		t.Error("String representation missing execution mode")
+
+	for _, check := range checks {
+		if !strings.Contains(str, check) {
+			t.Errorf("String representation missing '%s'", check)
+		}
 	}
 }
