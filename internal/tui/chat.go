@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,7 +16,7 @@ import (
 
 type ChatModel struct {
 	input          textinput.Model
-	messages       []string // UI display lines
+	messages       []string
 	sessionID      uint
 	cfg            *config.Config
 	prov           provider.Provider
@@ -213,61 +212,84 @@ func (m *ChatModel) startAIResponse(userInput string) {
 	userMsg := provider.Message{Role: "user", Content: userInput}
 	m.messageHistory = append(m.messageHistory, userMsg)
 
-	// Call AI
+	// Prepare the request with Tools
 	req := provider.Request{
 		Model:    m.cfg.Model,
 		Messages: m.messageHistory,
+		Tools:    executor.GetToolDefinitions(),
 		Stream:   true,
 	}
-	chunkChan, usageChan, err := m.prov.Stream(m.ctx, req)
+
+	chunkChan, usageChan, toolChan, err := m.prov.Stream(m.ctx, req)
 	if err != nil {
 		m.prog.Send(err)
 		m.waiting = false
 		return
 	}
 
-	// Stream AI response and accumulate
+	// Process the Text Stream
 	m.fullResponse.Reset()
 	for chunk := range chunkChan {
 		m.fullResponse.WriteString(chunk)
+		// This sends the string to the Update() method to refresh the UI
 		m.prog.Send(chunk)
 	}
+
 	fullText := m.fullResponse.String()
 
-	// Save assistant message synchronously
-	if _, err := m.dbManager.AddMessage(m.sessionID, "assistant", fullText); err != nil {
-		m.prog.Send(fmt.Errorf("failed to save assistant message: %w", err))
-		m.waiting = false
+	// Check for Tool Calls after the stream closes
+	// The provider sends these on toolChan after stitching fragments
+	finalTools := <-toolChan
+	if len(finalTools) > 0 {
+		// Store the assistant's intent to call a tool in history
+		m.messageHistory = append(m.messageHistory, provider.Message{
+			Role:      "assistant",
+			Content:   fullText,
+			ToolCalls: finalTools,
+		})
+
+		for _, tc := range finalTools {
+			m.prog.Send(fmt.Sprintf("\n[Executing %s...]", tc.Function.Name))
+
+			// Execute locally
+			result, err := m.exec.ExecuteTool(m.ctx, tc.Function.Name, tc.Function.Arguments)
+			if err != nil {
+				result = fmt.Sprintf("Error: %v", err)
+			}
+
+			// Feed results back to history
+			m.messageHistory = append(m.messageHistory, provider.Message{
+				Role:    "tool",
+				Content: result,
+				ToolID:  tc.ID,
+			})
+		}
+
+		// Recurse to let the AI process the tool results
+		m.startAIResponse("")
 		return
 	}
 
-	// Handle token usage (if available)
-	var usage provider.Usage
-	select {
-	case u, ok := <-usageChan:
-		if ok {
-			usage = u
+	// Finalize turn if no tools were called
+	if fullText != "" {
+		// Save assistant message to DB
+		if _, err := m.dbManager.AddMessage(m.sessionID, "assistant", fullText); err != nil {
+			m.prog.Send(fmt.Errorf("failed to save assistant message: %w", err))
 		}
-	case <-time.After(2 * time.Second):
-		// timeout, ignore
+
+		// Update history for the next turn
+		m.messageHistory = append(m.messageHistory, provider.Message{
+			Role:    "assistant",
+			Content: fullText,
+		})
 	}
+
+	// Handle Usage Display
+	usage := <-usageChan
 	if usage.TotalTokens > 0 && m.cfg.ShowUsage {
-		pricing := provider.GetPricing(m.cfg.Provider, m.cfg.Model)
-		usage.EstimatedCost = provider.CalculateCost(usage.PromptTokens, usage.CompletionTokens, pricing)
-		// Save token usage
-		msgs, _ := m.dbManager.GetMessages(m.sessionID)
-		if len(msgs) > 0 {
-			lastMsg := msgs[len(msgs)-1]
-			_ = m.dbManager.SaveTokenUsage(m.sessionID, lastMsg.ID, m.cfg.Provider, m.cfg.Model, usage)
-		}
-		// Display usage in the UI (as a message)
 		m.prog.Send(fmt.Sprintf("\n[Tokens: %d prompt, %d completion, %d total | Cost: $%.6f]\n",
 			usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.EstimatedCost))
 	}
-
-	// Update message history for future turns
-	assistantMsg := provider.Message{Role: "assistant", Content: fullText}
-	m.messageHistory = append(m.messageHistory, assistantMsg)
 
 	m.waiting = false
 }
