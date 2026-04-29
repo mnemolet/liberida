@@ -54,13 +54,15 @@ func (p *OpenRouterProvider) Name() string { return "openrouter" }
 type openRouterRequest struct {
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
+	Tools    []Tool    `json:"tools,omitempty"`
 	Stream   bool      `json:"stream"`
 }
 
 type openRouterResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content   string     `json:"content"`
+			ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 	} `json:"choices"`
 	Usage struct {
@@ -74,7 +76,8 @@ type openRouterResponse struct {
 type openRouterStreamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content   string     `json:"content"`
+			ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 	} `json:"choices"`
 	Usage *struct {
@@ -90,7 +93,7 @@ func (p *OpenRouterProvider) Complete(ctx context.Context, req Request) (*Respon
 	if useModel == "" {
 		useModel = p.model
 	}
-	httpReq, err := p.newOpenRouterRequest(ctx, useModel, req.Messages, false)
+	httpReq, err := p.newOpenRouterRequest(ctx, useModel, req.Messages, req.Tools, false)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +114,8 @@ func (p *OpenRouterProvider) Complete(ctx context.Context, req Request) (*Respon
 		return nil, fmt.Errorf("no response from OpenRouter")
 	}
 	return &Response{
-		Content: orResp.Choices[0].Message.Content,
+		Content:   orResp.Choices[0].Message.Content,
+		ToolCalls: orResp.Choices[0].Message.ToolCalls,
 		Usage: Usage{
 			PromptTokens:     orResp.Usage.PromptTokens,
 			CompletionTokens: orResp.Usage.CompletionTokens,
@@ -121,32 +125,39 @@ func (p *OpenRouterProvider) Complete(ctx context.Context, req Request) (*Respon
 	}, nil
 }
 
-func (p *OpenRouterProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
+func (p *OpenRouterProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, <-chan []ToolCall, error) {
 	useModel := req.Model
 	if useModel == "" {
 		useModel = p.model
 	}
-	httpReq, err := p.newOpenRouterRequest(ctx, useModel, req.Messages, true)
+	httpReq, err := p.newOpenRouterRequest(ctx, useModel, req.Messages, req.Tools, true)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, nil, fmt.Errorf("OpenRouter API error %d: %s", resp.StatusCode, string(body))
+		return nil, nil, nil, fmt.Errorf("OpenRouter API error %d: %s", resp.StatusCode, string(body))
 	}
+
 	chunkChan := make(chan string)
 	usageChan := make(chan Usage, 1)
+	toolChan := make(chan []ToolCall, 1)
+
 	go func() {
 		defer resp.Body.Close()
 		defer close(chunkChan)
 		defer close(usageChan)
+		defer close(toolChan)
+
 		scanner := bufio.NewScanner(resp.Body)
 		var finalUsage *Usage
+		var accumulatedTools []ToolCall
+
 		for scanner.Scan() {
 			line := scanner.Text()
 			if line == "" || !strings.HasPrefix(line, "data: ") {
@@ -156,17 +167,44 @@ func (p *OpenRouterProvider) Stream(ctx context.Context, req Request) (<-chan st
 			if line == "[DONE]" {
 				break
 			}
+
 			var chunk openRouterStreamChunk
 			if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 				continue
 			}
-			if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-				select {
-				case <-ctx.Done():
-					return
-				case chunkChan <- chunk.Choices[0].Delta.Content:
+
+			if len(chunk.Choices) > 0 {
+				delta := chunk.Choices[0].Delta
+
+				// Stream text output to the UI
+				if delta.Content != "" {
+					select {
+					case <-ctx.Done():
+						return
+					case chunkChan <- delta.Content:
+					}
+				}
+
+				// Stitch together tool call fragments
+				if len(delta.ToolCalls) > 0 {
+					for _, tc := range delta.ToolCalls {
+						// OpenRouter provides an 'Index' for streaming tool calls
+						// This tells us which tool call in the array we are updating
+						idx := 0 // default for safety if index is missing
+
+						if len(accumulatedTools) <= idx {
+							accumulatedTools = append(accumulatedTools, tc)
+						} else {
+							// Append the fragments of arguments/name as they arrive
+							accumulatedTools[idx].Function.Arguments += tc.Function.Arguments
+							if tc.Function.Name != "" {
+								accumulatedTools[idx].Function.Name = tc.Function.Name
+							}
+						}
+					}
 				}
 			}
+
 			if chunk.Usage != nil {
 				finalUsage = &Usage{
 					PromptTokens:     chunk.Usage.PromptTokens,
@@ -176,13 +214,19 @@ func (p *OpenRouterProvider) Stream(ctx context.Context, req Request) (<-chan st
 				}
 			}
 		}
+
+		// Finalize: Send the complete tool calls and usage
+		if len(accumulatedTools) > 0 {
+			toolChan <- accumulatedTools
+		}
+
 		if finalUsage != nil {
 			usageChan <- *finalUsage
 		} else {
 			usageChan <- Usage{}
 		}
 	}()
-	return chunkChan, usageChan, nil
+	return chunkChan, usageChan, toolChan, nil
 }
 
 func (p *OpenRouterProvider) ListModels(ctx context.Context) ([]string, error) {
@@ -210,11 +254,12 @@ func sanitizeMessages(messages []Message) []Message {
 }
 
 // Helper: newOpenRouterRequest creates an HTTP request with common headers
-func (p *OpenRouterProvider) newOpenRouterRequest(ctx context.Context, model string, messages []Message, stream bool) (*http.Request, error) {
+func (p *OpenRouterProvider) newOpenRouterRequest(ctx context.Context, model string, messages []Message, tools []Tool, stream bool) (*http.Request, error) {
 	model = mapModelAlias(model)
 	orReq := openRouterRequest{
 		Model:    model,
 		Messages: sanitizeMessages(messages),
+		Tools:    tools,
 		Stream:   stream,
 	}
 	data, err := json.Marshal(orReq)
