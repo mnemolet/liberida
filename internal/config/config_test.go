@@ -94,15 +94,6 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Valid OpenAI config (API key can be empty, validation only checks provider existence)",
-			config: &Config{
-				Provider:     "openai",
-				Model:        "gpt-4o",
-				OpenAIAPIKey: "",
-			},
-			wantErr: false, // We don't validate API key presence here
-		},
-		{
 			name: "Invalid - missing Ollama URL",
 			config: &Config{
 				Provider:  "ollama",

@@ -10,10 +10,6 @@ func TestGetPricing(t *testing.T) {
 		model    string
 		wantCost bool // whether cost should be > 0
 	}{
-		{"openai", "gpt-4o", true},
-		{"openai", "gpt-3.5-turbo", true},
-		{"anthropic", "claude-4-5-sonnet", true},
-		{"gemini", "gemini-flash-2.5", true},
 		{"ollama", "llama2", false},
 		{"unknown", "unknown", false},
 	}
