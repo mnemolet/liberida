@@ -1,23 +1,21 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"os/signal"
-	"regexp"
 	"strings"
 	"syscall"
-	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mnemolet/liberida/internal/actions"
 	"github.com/mnemolet/liberida/internal/config"
 	workspace "github.com/mnemolet/liberida/internal/context"
 	"github.com/mnemolet/liberida/internal/db"
 	"github.com/mnemolet/liberida/internal/executor"
-	"github.com/mnemolet/liberida/internal/llm"
 	"github.com/mnemolet/liberida/internal/provider"
+	"github.com/mnemolet/liberida/internal/tui"
 )
 
 var autoContextFlag bool
@@ -50,91 +48,50 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 		fmt.Println("\n\nInterrupted. Exiting.")
 		cancel()
 	}()
+
 	fmt.Printf("Starting chat session with %s (model: %s)\n", prov.Name(), cfg.Model)
 	fmt.Println("Type '/exit' or '/quit' to end the session.")
 	fmt.Println("------------------------------------------------")
 
-	// Init DB
-	dbManager, err := db.NewManager(cfg.DBPath)
+	dbManager, exec, err := initializeResources(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
+		return fmt.Errorf("[ERROR]: %w", err)
 	}
 	defer dbManager.Close()
+	defer exec.Close()
 
-	// Handle session
 	var currentSession *db.ChatSession
 	var isNewSession bool
 
 	if sessionID != 0 && !forceNew {
-		// Load existing session
 		currentSession, err = dbManager.GetSession(sessionID)
 		if err != nil {
 			return fmt.Errorf("failed to load session %d: %w", sessionID, err)
 		}
 		fmt.Printf("Resumed session: %s (ID: %d)\n", currentSession.Title, currentSession.ID)
 
-		// Display previous messages
 		if len(currentSession.Messages) > 0 {
 			fmt.Println("\n--- Previous conversation ---")
 			for _, msg := range currentSession.Messages {
 				if msg.Role == "user" {
 					fmt.Printf("You: %s\n", msg.Message)
 				} else {
-					cleanedMsg := cleanAIResponse(msg.Message)
-					fmt.Printf("AI: %s\n", cleanedMsg)
+					// cleanedMsg := cleanAIResponse(msg.Message)
+					fmt.Printf("AI: %s\n", msg.Message)
 				}
 			}
 			fmt.Println("--- Continuing ---")
 		}
 	} else {
-		// New session will be created on first message
 		isNewSession = true
 		fmt.Println("New session will be created when you send your first message.")
 	}
 
-	// Determine workspace directory (current working directory)
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
-	}
-	workspaceDir := cwd
-
-	// Create local executor
-	exec, err := executor.NewLocal(workspaceDir)
-	if err != nil {
-		return fmt.Errorf("failed to initialize local executor: %w", err)
-	}
-	defer exec.Close()
-	fmt.Printf("File operations allowed in: %s\n", workspaceDir)
-
-	reader := bufio.NewReader(os.Stdin)
-
-	// Build messages slice from history
-	messages := make([]provider.Message, 0)
-
 	// Collect workspace context if enabled
-	// TODO: need to fix!
-	var contextStr string
-	if cfg.AutoContext && exec != nil {
-		fmt.Print("Scanning workspace for context...")
-		scanner := workspace.NewWorkspaceScanner()
-		contextStr, err = scanner.CollectContext(exec, workspaceDir)
-		if err != nil {
-			fmt.Printf("Could not collect workspace context: %v\n", err)
-		} else {
-			fmt.Println("Done")
-			// Truncate if too long
-			const maxContextLength = 500
-			if len(contextStr) > maxContextLength {
-				contextStr = contextStr[:maxContextLength] + "\n... (truncated)"
-			}
-		}
-	}
+	contextStr := getWorkspaceContext(cfg, exec)
 
-	// System message with mode-appropriate instructions
-	var systemMsg provider.Message
-
-	systemMsgContent := fmt.Sprint(`You are a helpful AI assistant. 
+	// Build system message
+	systemMsgContent := strings.TrimSpace(`You are a helpful AI assistant.
 You can answer questions and also perform file operations when asked.
 CRITICAL INSTRUCTION:
 - For NORMAL questions: Respond with plain text, just like a normal conversation
@@ -146,193 +103,82 @@ User: "What is Python?"
 You: Python is a high-level, interpreted programming language known for its simplicity...
 
 User: "Explain variables"
-You: A variable is a container for storing data values...
-User: "who are you?"
-You: I'm an AI assistant that can help you with programming and general questions...`)
+You: A variable is a container for storing data values...`)
 
 	if contextStr != "" {
 		systemMsgContent = fmt.Sprintf("%s\n\n%s", systemMsgContent, contextStr)
 	}
 
-	systemMsg = provider.Message{
-		Role:    "system",
-		Content: systemMsgContent,
-	}
-	messages = append(messages, systemMsg)
-
-	// Add historical messages only if we have an existing session
+	// Build initial messages from existing session (excluding system message)
+	var initialMessages []provider.Message
 	if !isNewSession && currentSession != nil {
 		for _, msg := range currentSession.Messages {
-			messages = append(messages, provider.Message{
+			initialMessages = append(initialMessages, provider.Message{
 				Role:    msg.Role,
 				Content: msg.Message,
 			})
 		}
 	}
 
-	titleGenerated := false
+	var sessID uint
+	if currentSession != nil {
+		sessID = currentSession.ID
+	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
+	// Create TUI model
+	model := tui.NewChatModel(cfg, prov, dbManager, exec, sessID, systemMsgContent, initialMessages, ctx, cancel)
+	program := tea.NewProgram(model)
+	model.SetProgram(program)
 
-		fmt.Print("> ")
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("error reading input: %w", err)
-		}
-		input = strings.TrimSpace(input)
-
-		if input == "/exit" || input == "/quit" {
-			fmt.Println("Goodbye!")
-			break
-		}
-		if input == "" {
-			continue
-		}
-
-		// Create new session if needed
-		if isNewSession {
-			currentSession, err = dbManager.CreateSession("")
-			if err != nil {
-				return err
-			}
-			fmt.Printf("New session created (ID: %d)\n", currentSession.ID)
-			isNewSession = false
-		}
-
-		// Save user message to database
-		_, err = dbManager.AddMessage(currentSession.ID, "user", input)
-		if err != nil {
-			fmt.Printf("Warning: failed to save message: %v\n", err)
-		}
-
-		// Generate title from first user message
-		if cfg.AutoTitle && !titleGenerated && len(currentSession.Messages) == 0 {
-			title, err := llm.GenerateTitle(ctx, prov, input)
-			if err != nil || title == "" {
-				// Fallback to truncated first message
-				title = input
-				if len(title) > 30 {
-					title = title[:27] + "..."
-				}
-				fmt.Printf("\nUsing fallback title: %s\n", title)
-			} else {
-				fmt.Printf("\nGenerated title: %s\n", title)
-			}
-
-			if err := dbManager.UpdateSessionTitle(currentSession.ID, title); err != nil {
-				fmt.Printf("Warning: failed to save title: %v\n", err)
-			}
-			titleGenerated = true
-		}
-
-		messages = append(messages, provider.Message{Role: "user", Content: input})
-		reqMessages := getLastNMessages(messages, cfg.ContextSize)
-		req := provider.Request{
-			Model:    cfg.Model,
-			Messages: reqMessages,
-			Stream:   true,
-		}
-
-		fmt.Print("AI: ")
-		// fmt.Printf("\n[DEBUG] Sending %d messages to Ollama\n", len(reqMessages))
-		// for i, m := range reqMessages {
-		// 	fmt.Printf("[DEBUG] Message %d: role=%s, content preview=%s\n", i, m.Role, truncateString(m.Content, 50))
-		// }
-		chunkChan, usageChan, err := prov.Stream(ctx, req)
-		if err != nil {
-			fmt.Printf("\nError: %v\n", err)
-			continue
-		}
-
-		var fullResponse strings.Builder
-		for chunk := range chunkChan {
-			fmt.Print(chunk)
-			fullResponse.WriteString(chunk)
-		}
-		fmt.Println()
-
-		// Get usage information
-		var usage provider.Usage
-		gotUsage := false // Track if we actually got data
-
-		select {
-		case u, ok := <-usageChan:
-			if ok {
-				usage = u
-				gotUsage = true
-			}
-		case <-time.After(2 * time.Second):
-			// Timeout
-			fmt.Println("[DEBUG] Timeout: No usage data received after 2 seconds")
-		}
-
-		// Only do this if we actually got usage data
-		if gotUsage {
-			// Calculate cost based on provider and model
-			if usage.TotalTokens > 0 {
-				pricing := provider.GetPricing(cfg.Provider, cfg.Model)
-				usage.EstimatedCost = provider.CalculateCost(usage.PromptTokens, usage.CompletionTokens, pricing)
-				// Get the message ID of the assistant's response
-				// We need to get the most recent message for this session
-				messages, err := dbManager.GetMessages(currentSession.ID)
-				if err == nil && len(messages) > 0 {
-					lastMessage := messages[len(messages)-1]
-					err = dbManager.SaveTokenUsage(currentSession.ID, lastMessage.ID, cfg.Provider, cfg.Model, usage)
-					if err != nil {
-						fmt.Printf("Warning: failed to save token usage: %v\n", err)
-					}
-				}
-			}
-
-			// Display usage information
-			if cfg.ShowUsage {
-				fmt.Printf("\n[Tokens: %d prompt, %d completion, %d total | Cost: $%.6f]\n",
-					usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.EstimatedCost)
-			}
-		}
-
-		// Clean the AI response
-		rawResponse := fullResponse.String()
-		// fmt.Printf("RAW response: %s\n", rawResponse)
-		cleanedResponse := cleanAIResponse(rawResponse)
-
-		// Save cleaned AI response to database
-		_, err = dbManager.AddMessage(currentSession.ID, "assistant", cleanedResponse)
-		if err != nil {
-			fmt.Printf("Warning: failed to save message: %v\n", err)
-		}
-
-		// Add cleaned response to messages slice
-		messages = append(messages, provider.Message{Role: "assistant", Content: cleanedResponse})
-
-		// Execute any actions requested in the response
-		if exec != nil {
-			actList, err := actions.Parse(fullResponse.String())
-			if err == nil && len(actList) > 0 {
-				fmt.Println()
-				fmt.Println("The AI requested the following operations:")
-				for _, act := range actList {
-					fmt.Printf("- %s\n", act.String())
-				}
-				fmt.Print("Do you want to execute these? (y/n): ")
-				confirm, _ := reader.ReadString('\n')
-				confirm = strings.TrimSpace(strings.ToLower(confirm))
-				if confirm == "y" || confirm == "yes" {
-					for _, act := range actList {
-						executeAction(exec, act)
-					}
-				} else {
-					fmt.Println("Operations cancelled.")
-				}
-			}
-		}
+	if _, err := program.Run(); err != nil {
+		return fmt.Errorf("TUI error: %w", err)
 	}
 	return nil
+}
+
+// initializeResources handles the setup of the DB and local executor.
+func initializeResources(cfg *config.Config) (*db.Manager, executor.Executor, error) {
+	dbManager, err := db.NewManager(cfg.DBPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		dbManager.Close()
+		return nil, nil, fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	exec, err := executor.NewLocal(cwd)
+	if err != nil {
+		dbManager.Close()
+		return nil, nil, fmt.Errorf("failed to initialize local executor: %w", err)
+	}
+
+	return dbManager, exec, nil
+}
+
+func getWorkspaceContext(cfg *config.Config, exec executor.Executor) string {
+	if !cfg.AutoContext || exec == nil {
+		return ""
+	}
+
+	fmt.Print("Scanning workspace for context...")
+	scanner := workspace.NewWorkspaceScanner()
+	cwd, _ := os.Getwd()
+
+	contextStr, err := scanner.CollectContext(exec, cwd)
+	if err != nil {
+		fmt.Printf("Could not collect workspace context: %v\n", err)
+		return ""
+	}
+
+	fmt.Println("Done")
+	const maxContextLength = 2000 // Increased for better LLM utility
+	if len(contextStr) > maxContextLength {
+		return contextStr[:maxContextLength] + "\n... (truncated)"
+	}
+	return contextStr
 }
 
 // executeAction performs a single operation using the executor.
@@ -397,24 +243,4 @@ func getLastNMessages(messages []provider.Message, n int) []provider.Message {
 		return messages
 	}
 	return messages[len(messages)-n:]
-}
-
-// cleanAIResponse aggressively removes role prefixes from AI responses
-// Different models behave differently - this ensures consistent
-// output regardless of the underlying model's quirks.
-// It is idempotent - applying it multiple times is safe
-func cleanAIResponse(response string) string {
-	// Remove common role prefixes at the start of the string
-	re := regexp.MustCompile(`^(?i)(assistant|ai)\s*[:.-]?\s*`)
-	cleaned := re.ReplaceAllString(response, "")
-
-	// Remove any leading spaces or newlines
-	cleaned = strings.TrimSpace(cleaned)
-
-	// If the cleaned string is empty, return the original
-	if cleaned == "" {
-		return response
-	}
-
-	return cleaned
 }
