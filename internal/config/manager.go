@@ -50,9 +50,6 @@ func (m *Manager) Load() error {
 	m.viper.SetDefault("context_size", m.config.ContextSize)
 	m.viper.SetDefault("auto_context", m.config.AutoContext)
 	m.viper.SetDefault("auto_title", m.config.AutoTitle)
-	m.viper.SetDefault("openai_api_key", m.config.OpenAIAPIKey)
-	m.viper.SetDefault("anthropic_api_key", m.config.AnthropicAPIKey)
-	m.viper.SetDefault("gemini_api_key", m.config.GeminiAPIKey)
 	m.viper.SetDefault("openrouter_api_key", m.config.OpenRouterAPIKey)
 	m.viper.SetDefault("prompt_file", m.config.PromptFile)
 
@@ -81,9 +78,6 @@ func (m *Manager) Save() error {
 	m.viper.Set("context_size", m.config.ContextSize)
 	m.viper.Set("auto_context", m.config.AutoContext)
 	m.viper.Set("auto_title", m.config.AutoTitle)
-	m.viper.Set("openai_api_key", m.config.OpenAIAPIKey)
-	m.viper.Set("anthropic_api_key", m.config.AnthropicAPIKey)
-	m.viper.Set("gemini_api_key", m.config.GeminiAPIKey)
 	m.viper.Set("openrouter_api_key", m.config.OpenRouterAPIKey)
 	m.viper.Set("prompt_file", m.config.PromptFile)
 

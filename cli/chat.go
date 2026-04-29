@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mnemolet/liberida/internal/actions"
 	"github.com/mnemolet/liberida/internal/config"
 	workspace "github.com/mnemolet/liberida/internal/context"
 	"github.com/mnemolet/liberida/internal/db"
@@ -25,12 +24,6 @@ func createProvider(cfg *config.Config) (provider.Provider, error) {
 		return provider.NewOllamaProvider(cfg.OllamaURL, cfg.Model), nil
 	case "openrouter":
 		return provider.NewProvider("openrouter", "", cfg.Model, cfg.OpenRouterAPIKey)
-	case "openai":
-		return provider.NewProvider("openai", "", cfg.Model, cfg.OpenAIAPIKey)
-	case "anthropic":
-		return provider.NewProvider("anthropic", "", cfg.Model, cfg.AnthropicAPIKey)
-	case "gemini":
-		return provider.NewProvider("gemini", "", cfg.Model, cfg.GeminiAPIKey)
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", cfg.Provider)
 	}
@@ -196,62 +189,6 @@ func prepareSession(dbManager *db.Manager, sessionID uint, forceNew bool) (*db.C
 		return nil, false, fmt.Errorf("failed to create new session: %w", err)
 	}
 	return sess, true, nil
-}
-
-// executeAction performs a single operation using the executor.
-func executeAction(exec executor.Executor, act actions.Action) {
-	ctx := context.Background()
-
-	switch act.Type {
-	case actions.TypeWrite:
-		err := exec.WriteFile(act.Path, []byte(act.Content))
-		if err != nil {
-			fmt.Printf("Error: Write %s: %v\n", act.Path, err)
-		} else {
-			fmt.Printf("Ok: Written to %s\n", act.Path)
-		}
-
-	case actions.TypeRead:
-		data, err := exec.ReadFile(act.Path)
-		if err != nil {
-			fmt.Printf("Error: Read %s: %v\n", act.Path, err)
-		} else {
-			fmt.Printf("Ok: %s:\n%s\n", act.Path, string(data))
-		}
-
-	case actions.TypeDelete:
-		err := exec.DeleteFile(act.Path)
-		if err != nil {
-			fmt.Printf("Error: Delete %s: %v\n", act.Path, err)
-		} else {
-			fmt.Printf("Ok: Deleted %s\n", act.Path)
-		}
-
-	case actions.TypeList:
-		files, err := exec.ListFiles()
-		if err != nil {
-			fmt.Printf("Error: List files: %v\n", err)
-		} else {
-			fmt.Println("Ok: Files in workspace:")
-			for _, f := range files {
-				fmt.Printf("  - %s\n", f)
-			}
-		}
-
-	case actions.TypeExec:
-		output, err := exec.RunCommand(ctx, act.Command)
-		if err != nil {
-			fmt.Printf("Error: Command execution failed: %v\n", err)
-			if output != "" {
-				fmt.Printf("Output: %s\n", output)
-			}
-		} else {
-			fmt.Printf("Ok: Command executed successfully:\n%s\n", output)
-		}
-
-	default:
-		fmt.Printf("Error: Unknown action type: %s\n", act.Type)
-	}
 }
 
 // getLastNMessages returns the last N messages, or all if len(messages) < N.
