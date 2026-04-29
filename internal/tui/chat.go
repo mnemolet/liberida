@@ -185,17 +185,6 @@ func wrapText(text string, width int) string {
 }
 
 func (m *ChatModel) startAIResponse(userInput string) {
-	// Session creation (if new)
-	if m.sessionID == 0 {
-		session, err := m.dbManager.CreateSession("")
-		if err != nil {
-			m.prog.Send(fmt.Errorf("failed to create session: %w", err))
-			m.waiting = false
-			return
-		}
-		m.sessionID = session.ID
-	}
-
 	// Save user message synchronously
 	if _, err := m.dbManager.AddMessage(m.sessionID, "user", userInput); err != nil {
 		m.prog.Send(fmt.Errorf("failed to save user message: %w", err))

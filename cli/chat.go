@@ -60,8 +60,22 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 	defer dbManager.Close()
 	defer exec.Close()
 
-	var currentSession *db.ChatSession
-	var isNewSession bool
+	// Prepare the Session
+	currentSession, isNew, err := prepareSession(dbManager, sessionID, forceNew)
+	if err != nil {
+		return err
+	}
+
+	// Ghost Session Janitor
+	defer func() {
+		if isNew {
+			msgs, _ := dbManager.GetMessages(currentSession.ID)
+			if len(msgs) == 0 {
+				_ = dbManager.DeleteSession(currentSession.ID)
+				// No print needed, just silent cleanup
+			}
+		}
+	}()
 
 	if sessionID != 0 && !forceNew {
 		currentSession, err = dbManager.GetSession(sessionID)
@@ -82,9 +96,6 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 			}
 			fmt.Println("--- Continuing ---")
 		}
-	} else {
-		isNewSession = true
-		fmt.Println("New session will be created when you send your first message.")
 	}
 
 	// Collect workspace context if enabled
@@ -111,7 +122,7 @@ You: A variable is a container for storing data values...`)
 
 	// Build initial messages from existing session (excluding system message)
 	var initialMessages []provider.Message
-	if !isNewSession && currentSession != nil {
+	if !isNew && currentSession != nil {
 		for _, msg := range currentSession.Messages {
 			initialMessages = append(initialMessages, provider.Message{
 				Role:    msg.Role,
@@ -179,6 +190,25 @@ func getWorkspaceContext(cfg *config.Config, exec executor.Executor) string {
 		return contextStr[:maxContextLength] + "\n... (truncated)"
 	}
 	return contextStr
+}
+
+// prepareSession returns the session and a boolean indicating if it's a new, empty session.
+func prepareSession(dbManager *db.Manager, sessionID uint, forceNew bool) (*db.ChatSession, bool, error) {
+	if sessionID != 0 && !forceNew {
+		sess, err := dbManager.GetSession(sessionID)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to load session %d: %w", sessionID, err)
+		}
+		fmt.Printf("Resumed session: %s (ID: %d)\n", sess.Title, sess.ID)
+		return sess, false, nil
+	}
+
+	// Create a placeholder session
+	sess, err := dbManager.CreateSession("New Chat")
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to create new session: %w", err)
+	}
+	return sess, true, nil
 }
 
 // executeAction performs a single operation using the executor.
