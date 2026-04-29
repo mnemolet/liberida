@@ -7,13 +7,11 @@ import (
 	"strings"
 )
 
-// GeminiProvider implements the Provider interface for Google Gemini
 type GeminiProvider struct {
 	client *HTTPClient
 	model  string
 }
 
-// NewGeminiProvider creates a new Gemini provider
 func NewGeminiProvider(apiKey, model string) *GeminiProvider {
 	client := NewHTTPClient("https://generativelanguage.googleapis.com/v1", apiKey)
 	return &GeminiProvider{
@@ -22,12 +20,10 @@ func NewGeminiProvider(apiKey, model string) *GeminiProvider {
 	}
 }
 
-// Name returns the provider name
 func (p *GeminiProvider) Name() string {
 	return "gemini"
 }
 
-// Gemini request structures based on official API docs
 type geminiContent struct {
 	Parts []geminiPart `json:"parts"`
 	Role  string       `json:"role,omitempty"`
@@ -47,7 +43,6 @@ type geminiConfig struct {
 	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
 }
 
-// Gemini response structures
 type geminiResponse struct {
 	Candidates []struct {
 		Content struct {
@@ -63,7 +58,6 @@ type geminiResponse struct {
 	} `json:"usageMetadata"`
 }
 
-// Gemini streaming response structure
 type geminiStreamResponse struct {
 	Candidates []struct {
 		Content struct {
@@ -146,7 +140,7 @@ func (p *GeminiProvider) Complete(ctx context.Context, req Request) (*Response, 
 }
 
 // Stream sends a streaming request to Gemini
-func (p *GeminiProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
+func (p *GeminiProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, <-chan []ToolCall, error) {
 	model := req.Model
 	if model == "" {
 		model = p.model
@@ -167,15 +161,17 @@ func (p *GeminiProvider) Stream(ctx context.Context, req Request) (<-chan string
 	endpoint := fmt.Sprintf("/models/%s:streamGenerateContent?key=%s", model, p.client.apiKey)
 	chunkChan, err := p.client.PostStream(ctx, endpoint, geminiReq)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	contentChan := make(chan string)
 	usageChan := make(chan Usage)
+	toolChan := make(chan []ToolCall, 1)
 
 	go func() {
 		defer close(contentChan)
 		defer close(usageChan)
+		defer close(toolChan)
 
 		var finalUsage *Usage
 
@@ -211,7 +207,6 @@ func (p *GeminiProvider) Stream(ctx context.Context, req Request) (<-chan string
 			// For now, we'll send usage as zero and let the caller calculate
 		}
 
-		// If we have final usage from somewhere, send it
 		if finalUsage != nil {
 			select {
 			case <-ctx.Done():
@@ -221,12 +216,10 @@ func (p *GeminiProvider) Stream(ctx context.Context, req Request) (<-chan string
 		}
 	}()
 
-	return contentChan, usageChan, nil
+	return contentChan, usageChan, toolChan, nil
 }
 
-// ListModels returns available Gemini models
 func (p *GeminiProvider) ListModels(ctx context.Context) ([]string, error) {
-	// Gemini models are well-known
 	return []string{
 		"gemini-pro-2.5",
 		"gemini-flash-2.5",

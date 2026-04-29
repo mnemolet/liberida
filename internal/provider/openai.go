@@ -22,12 +22,10 @@ func NewOpenAIProvider(apiKey, model string) *OpenAIProvider {
 	}
 }
 
-// Name returns the provider name
 func (p *OpenAIProvider) Name() string {
 	return "openai"
 }
 
-// openaiRequest represents the request body for OpenAI chat completion
 type openaiRequest struct {
 	Model       string    `json:"model"`
 	Messages    []Message `json:"messages"`
@@ -36,7 +34,6 @@ type openaiRequest struct {
 	Stream      bool      `json:"stream,omitempty"`
 }
 
-// openaiResponse represents the response from OpenAI
 type openaiResponse struct {
 	Choices []struct {
 		Message struct {
@@ -50,7 +47,6 @@ type openaiResponse struct {
 	} `json:"usage,omitempty"`
 }
 
-// openaiStreamResponse represents a streaming response chunk
 type openaiStreamResponse struct {
 	Choices []struct {
 		Delta struct {
@@ -100,7 +96,7 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req Request) (*Response, 
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
-			EstimatedCost:    0, // Will be calculated by caller
+			EstimatedCost:    0,
 		}
 	}
 
@@ -111,7 +107,7 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req Request) (*Response, 
 }
 
 // Stream sends a streaming request to OpenAI
-func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
+func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, <-chan []ToolCall, error) {
 	model := req.Model
 	if model == "" {
 		model = p.model
@@ -127,16 +123,18 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan string
 
 	chunkChan, err := p.client.PostStream(ctx, "/chat/completions", openaiReq)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Transform SSE chunks into content strings
 	contentChan := make(chan string)
 	usageChan := make(chan Usage)
+	toolChan := make(chan []ToolCall, 1)
 
 	go func() {
 		defer close(contentChan)
 		defer close(usageChan)
+		defer close(toolChan)
 
 		var finalUsage *Usage
 
@@ -186,10 +184,9 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan string
 		}
 	}()
 
-	return contentChan, usageChan, nil
+	return contentChan, usageChan, toolChan, nil
 }
 
-// ListModels returns available OpenAI models
 func (p *OpenAIProvider) ListModels(ctx context.Context) ([]string, error) {
 	var resp struct {
 		Data []struct {

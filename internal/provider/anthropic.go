@@ -7,13 +7,11 @@ import (
 	"strings"
 )
 
-// AnthropicProvider implements the Provider interface for Anthropic Claude
 type AnthropicProvider struct {
 	client *HTTPClient
 	model  string
 }
 
-// NewAnthropicProvider creates a new Anthropic provider
 func NewAnthropicProvider(apiKey, model string) *AnthropicProvider {
 	client := NewHTTPClient("https://api.anthropic.com/v1", apiKey)
 	client.SetHeader("anthropic-version", "2023-06-01")
@@ -23,12 +21,10 @@ func NewAnthropicProvider(apiKey, model string) *AnthropicProvider {
 	}
 }
 
-// Name returns the provider name
 func (p *AnthropicProvider) Name() string {
 	return "anthropic"
 }
 
-// anthropicRequest represents the request body for Anthropic messages API
 type anthropicRequest struct {
 	Model     string    `json:"model"`
 	Messages  []Message `json:"messages"`
@@ -37,7 +33,6 @@ type anthropicRequest struct {
 	System    string    `json:"system,omitempty"`
 }
 
-// anthropicResponse represents the response from Anthropic
 type anthropicResponse struct {
 	Content []struct {
 		Text string `json:"text"`
@@ -48,7 +43,6 @@ type anthropicResponse struct {
 	} `json:"usage,omitempty"`
 }
 
-// anthropicStreamResponse represents a streaming response chunk
 type anthropicStreamResponse struct {
 	Type  string `json:"type"`
 	Delta struct {
@@ -127,7 +121,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req Request) (*Respons
 }
 
 // Stream sends a streaming request to Anthropic
-func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
+func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, <-chan []ToolCall, error) {
 	model := req.Model
 	if model == "" {
 		model = p.model
@@ -159,15 +153,17 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan str
 
 	chunkChan, err := p.client.PostStream(ctx, "/messages", anthropicReq)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	contentChan := make(chan string)
 	usageChan := make(chan Usage)
+	toolChan := make(chan []ToolCall, 1)
 
 	go func() {
 		defer close(contentChan)
 		defer close(usageChan)
+		defer close(toolChan)
 
 		var finalUsage *Usage
 
@@ -215,10 +211,9 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan str
 		}
 	}()
 
-	return contentChan, usageChan, nil
+	return contentChan, usageChan, toolChan, nil
 }
 
-// ListModels returns available Anthropic models using the /v1/models endpoint
 func (p *AnthropicProvider) ListModels(ctx context.Context) ([]string, error) {
 	// Create a new client for the models endpoint
 	modelsClient := NewHTTPClient("https://api.anthropic.com/v1", p.client.apiKey)
