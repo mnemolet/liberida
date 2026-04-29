@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -101,20 +100,8 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 	// Collect workspace context if enabled
 	contextStr := getWorkspaceContext(cfg, exec)
 
-	// Build system message
-	systemMsgContent := strings.TrimSpace(`You are a helpful AI assistant.
-You can answer questions and also perform file operations when asked.
-CRITICAL INSTRUCTION:
-- For NORMAL questions: Respond with plain text, just like a normal conversation
-- Never output JSON for normal questions
-- Never prefix your responses with "Assistant:" or "AI:". Just respond directly.
-
-NORMAL CONVERSATION EXAMPLE (what you should do 99% of the time):
-User: "What is Python?"
-You: Python is a high-level, interpreted programming language known for its simplicity...
-
-User: "Explain variables"
-You: A variable is a container for storing data values...`)
+	// Load system prompt
+	systemMsgContent := cfg.GetSystemPrompt()
 
 	if contextStr != "" {
 		systemMsgContent = fmt.Sprintf("%s\n\n%s", systemMsgContent, contextStr)
