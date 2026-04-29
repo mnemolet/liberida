@@ -1,11 +1,15 @@
 package config
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+//go:embed prompts/default.md
+var defaultPromptEmbed embed.FS
 
 type Config struct {
 	Provider         string `mapstructure:"provider"`
@@ -20,6 +24,7 @@ type Config struct {
 	AnthropicAPIKey  string `mapstructure:"anthropic_api_key"`
 	GeminiAPIKey     string `mapstructure:"gemini_api_key"`
 	OpenRouterAPIKey string `mapstructure:"openrouter_api_key"`
+	PromptFile       string `mapstructure:"prompt_file"`
 }
 
 func DefaultConfig(hp HomeDirProvider) *Config {
@@ -39,7 +44,26 @@ func DefaultConfig(hp HomeDirProvider) *Config {
 		AnthropicAPIKey:  "",
 		GeminiAPIKey:     "",
 		OpenRouterAPIKey: "",
+		PromptFile:       "prompts/default.md",
 	}
+}
+
+// default and a user-defined file.
+func (c *Config) GetSystemPrompt() string {
+	// Try to read from User's PromptFile if it exists
+	if c.PromptFile != "" {
+		content, err := os.ReadFile(c.PromptFile)
+		if err == nil {
+			return string(content)
+		}
+	}
+
+	// Fallback to embedded default
+	data, err := defaultPromptEmbed.ReadFile("prompts/default.md")
+	if err != nil {
+		return "You are a helpful AI assistant." // Hard fallback
+	}
+	return string(data)
 }
 
 func ExpandPath(path string, hp HomeDirProvider) string {
