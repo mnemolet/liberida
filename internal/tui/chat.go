@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -249,12 +250,31 @@ func (m *ChatModel) startAIResponse(userInput string) {
 		})
 
 		for _, tc := range finalTools {
-			m.prog.Send(fmt.Sprintf("\n[Executing %s...]", tc.Function.Name))
+			// Parse arguments for UI display
+			var displayInfo string
+			switch tc.Function.Name {
+			case "write_file":
+				var args struct{ Path string }
+				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				displayInfo = fmt.Sprintf("Writing file: %s", args.Path)
+			case "run_command":
+				var args struct{ Command []string }
+				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				displayInfo = fmt.Sprintf("Running: %s", strings.Join(args.Command, " "))
+			default:
+				displayInfo = fmt.Sprintf("Executing: %s", tc.Function.Name)
+			}
+
+			// Send the specific action to the UI
+			m.prog.Send("\n" + displayInfo)
 
 			// Execute locally
 			result, err := m.exec.ExecuteTool(m.ctx, tc.Function.Name, tc.Function.Arguments)
 			if err != nil {
+				m.prog.Send(fmt.Sprintf("\nError: %v", err))
 				result = fmt.Sprintf("Error: %v", err)
+			} else {
+				m.prog.Send(fmt.Sprintf("\n%s", result))
 			}
 
 			// Feed results back to history
