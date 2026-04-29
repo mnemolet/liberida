@@ -14,6 +14,6 @@ type Executor interface {
 	ListFiles() ([]string, error)
 	// RunCommand executes a command and returns its combined output.
 	RunCommand(ctx context.Context, command []string) (string, error)
-	// Close releases any resources (e.g., stops a container).
+	ExecuteTool(ctx context.Context, name string, argsJSON string) (string, error)
 	Close() error
 }
