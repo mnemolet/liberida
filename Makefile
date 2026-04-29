@@ -38,11 +38,11 @@ test-coverage:
 
 .PHONY: build
 build:
-	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cli
+	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd
 
 .PHONY: install
 install:
-	go install -ldflags "$(LDFLAGS)" ./cli
+	go install -ldflags "$(LDFLAGS)" ./cmd
 
 .PHONY: clean
 clean:
