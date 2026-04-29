@@ -10,7 +10,7 @@ import (
 type MockProvider struct {
 	name           string
 	completeFunc   func(ctx context.Context, req Request) (*Response, error)
-	streamFunc     func(ctx context.Context, req Request) (<-chan string, <-chan Usage, error)
+	streamFunc     func(ctx context.Context, req Request) (<-chan string, <-chan Usage, <-chan []ToolCall, error)
 	listModelsFunc func(ctx context.Context) ([]string, error)
 }
 
@@ -38,13 +38,15 @@ func NewMockProvider() *MockProvider {
 				},
 			}, nil
 		},
-		streamFunc: func(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
+		streamFunc: func(ctx context.Context, req Request) (<-chan string, <-chan Usage, <-chan []ToolCall, error) {
 			chunkChan := make(chan string)
 			usageChan := make(chan Usage)
+			toolChan := make(chan []ToolCall)
 
 			go func() {
 				defer close(chunkChan)
 				defer close(usageChan)
+				defer close(toolChan)
 
 				// Simulate streaming chunks
 				chunks := []string{"Mock ", "streaming ", "response"}
@@ -73,7 +75,7 @@ func NewMockProvider() *MockProvider {
 				}
 			}()
 
-			return chunkChan, usageChan, nil
+			return chunkChan, usageChan, toolChan, nil
 		},
 		listModelsFunc: func(ctx context.Context) ([]string, error) {
 			return []string{"mock-model-1", "mock-model-2"}, nil
@@ -88,7 +90,7 @@ func (m *MockProvider) WithCompleteFunc(fn CompleteFunc) *MockProvider {
 }
 
 // WithStreamFunc allows customizing the Stream behavior for testing
-func (m *MockProvider) WithStreamFunc(fn func(ctx context.Context, req Request) (<-chan string, <-chan Usage, error)) *MockProvider {
+func (m *MockProvider) WithStreamFunc(fn func(ctx context.Context, req Request) (<-chan string, <-chan Usage, <-chan []ToolCall, error)) *MockProvider {
 	m.streamFunc = fn
 	return m
 }
@@ -110,7 +112,7 @@ func (m *MockProvider) Complete(ctx context.Context, req Request) (*Response, er
 }
 
 // Stream sends a streaming request
-func (m *MockProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
+func (m *MockProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, <-chan []ToolCall, error) {
 	return m.streamFunc(ctx, req)
 }
 

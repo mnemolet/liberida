@@ -28,23 +28,22 @@ func NewOllamaProvider(baseURL, model string) *OllamaProvider {
 	}
 }
 
-// Name returns the provider name.
 func (p *OllamaProvider) Name() string {
 	return "ollama"
 }
 
-// ---------- Request/Response Structs for Ollama API ----------
-// replace ollamaGenerateRequest and ollamaGenerateResponse with:
 type ollamaChatRequest struct {
 	Model    string                 `json:"model"`
 	Messages []ollamaChatMessage    `json:"messages"`
+	Tools    []Tool                 `json:"tools,omitempty"`
 	Stream   bool                   `json:"stream"`
 	Options  map[string]interface{} `json:"options,omitempty"`
 }
 
 type ollamaChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string     `json:"role"`
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type ollamaChatResponse struct {
@@ -61,7 +60,9 @@ type ollamaTagsResponse struct {
 
 type ollamaChatStreamResponse struct {
 	Message struct {
-		Content string `json:"content"`
+		Role      string     `json:"role"`
+		Content   string     `json:"content"`
+		ToolCalls []ToolCall `json:"tool_calls"`
 	} `json:"message"`
 	Done            bool `json:"done"`
 	PromptEvalCount int  `json:"prompt_eval_count"`
@@ -97,7 +98,7 @@ func (p *OllamaProvider) Complete(ctx context.Context, req Request) (*Response, 
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	url := p.baseURL + "/api/chat" // changed from /api/generate
+	url := p.baseURL + "/api/chat"
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -122,15 +123,13 @@ func (p *OllamaProvider) Complete(ctx context.Context, req Request) (*Response, 
 	return &Response{
 		Content: chatResp.Message.Content,
 		Usage: Usage{
-			// Ollama chat API doesn't return token counts in non-streaming mode easily
-			// You can ignore or try to get from another endpoint
 			EstimatedCost: 0.0,
 		},
 	}, nil
 }
 
 // Stream sends a streaming request using chat API.
-func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, error) {
+func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string, <-chan Usage, <-chan []ToolCall, error) {
 	model := req.Model
 	if model == "" {
 		model = p.model
@@ -139,14 +138,20 @@ func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string
 	// Convert internal messages to Ollama chat messages
 	chatMessages := make([]ollamaChatMessage, len(req.Messages))
 	for i, msg := range req.Messages {
-		chatMessages[i] = ollamaChatMessage{Role: msg.Role, Content: msg.Content}
+		chatMessages[i] = ollamaChatMessage{
+			Role:      msg.Role,
+			Content:   msg.Content,
+			ToolCalls: msg.ToolCalls,
+		}
 	}
 
 	ollamaReq := ollamaChatRequest{
 		Model:    model,
 		Messages: chatMessages,
+		Tools:    req.Tools,
 		Stream:   true,
 	}
+
 	if req.Temperature != 0 {
 		ollamaReq.Options = map[string]interface{}{
 			"temperature": req.Temperature,
@@ -155,38 +160,41 @@ func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string
 
 	data, err := json.Marshal(ollamaReq)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 	// fmt.Printf("[DEBUG] Ollama request: %s\n", string(data))
 
 	url := p.baseURL + "/api/chat" // changed
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to send request: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		// bodyBytes, _ := io.ReadAll(resp.Body)
 		// fmt.Printf("[DEBUG] Ollama error response: %s\n", string(bodyBytes))
 		resp.Body.Close()
-		return nil, nil, fmt.Errorf("ollama API returned status %d", resp.StatusCode)
+		return nil, nil, nil, fmt.Errorf("ollama API returned status %d", resp.StatusCode)
 	}
 
 	chunkChan := make(chan string)
 	usageChan := make(chan Usage, 1)
+	toolChan := make(chan []ToolCall, 1)
 
 	go func() {
 		defer resp.Body.Close()
 		defer close(chunkChan)
 		defer close(usageChan)
+		defer close(toolChan)
 
 		var finalUsage *Usage
+		var accumulatedTools []ToolCall
 
 		scanner := bufio.NewScanner(resp.Body)
 		// For streaming, Ollama sends one JSON object per line, each with a "message" field.
@@ -195,12 +203,12 @@ func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string
 			if line == "" {
 				continue
 			}
-			// fmt.Printf("[DEBUG] Raw line: %s\n", line)
+
 			var streamResp ollamaChatStreamResponse
 			if err := json.Unmarshal([]byte(line), &streamResp); err != nil {
-				// fmt.Printf("[DEBUG] JSON parse error: %v\n", err)
 				continue
 			}
+
 			if streamResp.Message.Content != "" {
 				select {
 				case <-ctx.Done():
@@ -208,6 +216,23 @@ func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string
 				case chunkChan <- streamResp.Message.Content:
 				}
 			}
+
+			// Handle Text Content
+			if streamResp.Message.Content != "" {
+				select {
+				case <-ctx.Done():
+					return
+				case chunkChan <- streamResp.Message.Content:
+				}
+			}
+
+			// Accumulate Tool Calls
+			// Unlike OpenRouter, Ollama often sends the whole tool call at once
+			// in the final chunk or specific tool chunks.
+			if len(streamResp.Message.ToolCalls) > 0 {
+				accumulatedTools = append(accumulatedTools, streamResp.Message.ToolCalls...)
+			}
+
 			if streamResp.Done {
 				finalUsage = &Usage{
 					PromptTokens:     streamResp.PromptEvalCount,
@@ -218,15 +243,20 @@ func (p *OllamaProvider) Stream(ctx context.Context, req Request) (<-chan string
 				break
 			}
 		}
+
+		// Finalize
+		if len(accumulatedTools) > 0 {
+			toolChan <- accumulatedTools
+		}
+
 		if finalUsage != nil {
 			usageChan <- *finalUsage
 		}
 	}()
 
-	return chunkChan, usageChan, nil
+	return chunkChan, usageChan, toolChan, nil
 }
 
-// ListModels returns the list of available models from Ollama.
 func (p *OllamaProvider) ListModels(ctx context.Context) ([]string, error) {
 	url := p.baseURL + "/api/tags"
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)

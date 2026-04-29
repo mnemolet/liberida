@@ -24,21 +24,6 @@ type ModelPricing struct {
 // GetPricing returns the pricing for a given provider and model
 func GetPricing(provider, model string) ModelPricing {
 	pricing := map[string]map[string]ModelPricing{
-		"openai": {
-			"gpt-4o":        {InputPricePer1K: 0.0025, OutputPricePer1K: 0.0100},
-			"gpt-4o-mini":   {InputPricePer1K: 0.00015, OutputPricePer1K: 0.00060},
-			"gpt-4-turbo":   {InputPricePer1K: 0.0100, OutputPricePer1K: 0.0300},
-			"gpt-3.5-turbo": {InputPricePer1K: 0.0005, OutputPricePer1K: 0.0015},
-		},
-		"anthropic": {
-			"claude-4-5-sonnet": {InputPricePer1K: 0.0030, OutputPricePer1K: 0.0150},
-			"claude-4-5-opus":   {InputPricePer1K: 0.0150, OutputPricePer1K: 0.0750},
-			"claude-4-5-haiku":  {InputPricePer1K: 0.00025, OutputPricePer1K: 0.00125},
-		},
-		"gemini": {
-			"gemini-flash-2.5": {InputPricePer1K: 0.00010, OutputPricePer1K: 0.00040},
-			"gemini-pro-2.5":   {InputPricePer1K: 0.00125, OutputPricePer1K: 0.00500},
-		},
 		"ollama": {
 			"default": {InputPricePer1K: 0.0, OutputPricePer1K: 0.0},
 		},

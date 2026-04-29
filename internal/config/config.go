@@ -20,9 +20,6 @@ type Config struct {
 	AutoContext      bool   `mapstructure:"auto_context"`
 	AutoTitle        bool   `mapstructure:"auto_title"`
 	ShowUsage        bool   `mapstructure:"show_usage"`
-	OpenAIAPIKey     string `mapstructure:"openai_api_key"`
-	AnthropicAPIKey  string `mapstructure:"anthropic_api_key"`
-	GeminiAPIKey     string `mapstructure:"gemini_api_key"`
 	OpenRouterAPIKey string `mapstructure:"openrouter_api_key"`
 	PromptFile       string `mapstructure:"prompt_file"`
 }
@@ -40,9 +37,6 @@ func DefaultConfig(hp HomeDirProvider) *Config {
 		AutoContext:      false,
 		AutoTitle:        false,
 		ShowUsage:        true,
-		OpenAIAPIKey:     "",
-		AnthropicAPIKey:  "",
-		GeminiAPIKey:     "",
 		OpenRouterAPIKey: "",
 		PromptFile:       "prompts/default.md",
 	}

@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -107,4 +108,35 @@ func (l *LocalExecutor) RunCommand(ctx context.Context, command []string) (strin
 
 func (l *LocalExecutor) Close() error {
 	return nil // nothing to close
+}
+
+// ExecuteTool takes a tool call from the LLM, parses arguments, and runs the local command
+func (l *LocalExecutor) ExecuteTool(ctx context.Context, name string, argsJSON string) (string, error) {
+	switch name {
+	case "write_file":
+		var args struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("invalid arguments for write_file: %w", err)
+		}
+		err := l.WriteFile(args.Path, []byte(args.Content))
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Successfully wrote to %s", args.Path), nil
+
+	case "run_command":
+		var args struct {
+			Command []string `json:"command"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("invalid arguments for run_command: %w", err)
+		}
+		return l.RunCommand(ctx, args.Command)
+
+	default:
+		return "", fmt.Errorf("unknown tool: %s", name)
+	}
 }
