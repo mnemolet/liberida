@@ -124,6 +124,16 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("TUI error: %w", err)
 	}
+
+	// Reload session to get updated title (may have been auto-generated)
+	finalSession, err := dbManager.GetSession(currentSession.ID)
+	if err != nil {
+		return fmt.Errorf("failed to reload session: %w", err)
+	}
+
+	fmt.Printf("\n%s\n", finalSession.Title)
+	fmt.Printf("liberida --session %d\n", finalSession.ID)
+
 	return nil
 }
 
