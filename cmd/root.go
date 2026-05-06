@@ -46,7 +46,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().Uint("session", 0, "Resume existing session by ID")
+	rootCmd.PersistentFlags().UintP("session", "s", 0, "Resume existing session by ID")
 	rootCmd.PersistentFlags().Bool("new", false, "Force create new session (ignore --session)")
 	rootCmd.PersistentFlags().Bool("no-context", false, "Disable automatic workspace context")
 }
