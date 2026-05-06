@@ -189,7 +189,6 @@ func prepareSession(dbManager *db.Manager, sessionID uint, forceNew bool) (*db.C
 		if err != nil {
 			return nil, false, fmt.Errorf("failed to load session %d: %w", sessionID, err)
 		}
-		fmt.Printf("Resumed session: %s (ID: %d)\n", sess.Title, sess.ID)
 		return sess, false, nil
 	}
 
