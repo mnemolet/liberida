@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mnemolet/liberida/internal/config"
 	"github.com/mnemolet/liberida/internal/db"
 	"github.com/mnemolet/liberida/internal/executor"
@@ -34,7 +35,37 @@ type ChatModel struct {
 	terminalHeight int
 	viewport       viewport.Model
 	titleGenerated bool
+	ready          bool
 }
+
+const (
+	headerHeight = 1
+	footerHeight = 3
+)
+
+var (
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("205")).
+			Padding(0, 1)
+
+	viewportBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("63")).
+				Padding(0, 1)
+
+	inputBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("63")).
+				Padding(0, 1)
+
+	userMsgStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("86")).
+			Bold(true)
+
+	aiMsgStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("212"))
+)
 
 func NewChatModel(
 	cfg *config.Config,
@@ -51,7 +82,6 @@ func NewChatModel(
 	input.Placeholder = "Type your message..."
 	input.Focus()
 	input.CharLimit = 0
-	input.Width = 80
 
 	// Prepend system message to history
 	history := make([]provider.Message, 0, len(initialMessages)+1)
@@ -60,11 +90,19 @@ func NewChatModel(
 	}
 	history = append(history, initialMessages...)
 
-	vp := viewport.New(80, 20)
+	// Populate initial messages for display
+	displayMessages := make([]string, 0, len(initialMessages))
+	for _, msg := range initialMessages {
+		if msg.Role == "user" {
+			displayMessages = append(displayMessages, fmt.Sprintf("You: %s", msg.Content))
+		} else if msg.Role == "assistant" {
+			displayMessages = append(displayMessages, fmt.Sprintf("AI: %s", msg.Content))
+		}
+	}
 
 	return &ChatModel{
 		input:          input,
-		messages:       []string{}, // will be populated from initialMessages later
+		messages:       displayMessages,
 		sessionID:      sessionID,
 		cfg:            cfg,
 		prov:           prov,
@@ -76,10 +114,11 @@ func NewChatModel(
 		prog:           nil,
 		fullResponse:   strings.Builder{},
 		messageHistory: history,
-		terminalWidth:  80,
-		terminalHeight: 24,
-		viewport:       vp,
+		terminalWidth:  0,
+		terminalHeight: 0,
+		viewport:       viewport.New(0, 0),
 		titleGenerated: false,
+		ready:          false,
 	}
 }
 
@@ -115,6 +154,7 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Start AI response in background
 				go m.startAIResponse(userInput)
 				m.updateViewportContent()
+				m.viewport.GotoBottom()
 				return m, nil
 			}
 		case "up":
@@ -147,6 +187,7 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, "AI: "+msg)
 		}
 		m.updateViewportContent()
+		m.viewport.GotoBottom()
 		return m, nil
 	case error:
 		if m.waiting {
@@ -154,14 +195,26 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.waiting = false
 		}
 		m.updateViewportContent()
+		m.viewport.GotoBottom()
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.terminalWidth = msg.Width
 		m.terminalHeight = msg.Height
-		m.input.Width = msg.Width - 4
-		m.viewport.Width = msg.Width
-		m.viewport.Height = msg.Height - 4
+
+		vpWidth := msg.Width - viewportBorderStyle.GetHorizontalBorderSize()
+		vpHeight := msg.Height - headerHeight - footerHeight - viewportBorderStyle.GetVerticalBorderSize()
+
+		if !m.ready {
+			m.viewport = viewport.New(vpWidth, vpHeight)
+			m.ready = true
+		} else {
+			m.viewport.Width = vpWidth
+			m.viewport.Height = vpHeight
+		}
+
+		m.input.Width = msg.Width - inputBorderStyle.GetHorizontalBorderSize()
 		m.updateViewportContent()
+		m.viewport.GotoBottom()
 		return m, nil
 	}
 
@@ -172,48 +225,39 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *ChatModel) updateViewportContent() {
 	var b strings.Builder
-	width := m.terminalWidth
-	if width < 40 {
-		width = 40
+	vpWidth := m.viewport.Width
+	if vpWidth <= 0 {
+		vpWidth = 80
 	}
 	for _, msg := range m.messages {
-		wrapped := wrapText(msg, width)
-		b.WriteString(wrapped)
+		var styled string
+		if strings.HasPrefix(msg, "You:") {
+			content := strings.TrimPrefix(msg, "You:")
+			style := userMsgStyle.Copy().Width(vpWidth)
+			styled = style.Render("You:" + content)
+		} else if strings.HasPrefix(msg, "AI:") {
+			content := strings.TrimPrefix(msg, "AI:")
+			style := aiMsgStyle.Copy().Width(vpWidth)
+			styled = style.Render("AI:" + content)
+		} else {
+			styled = msg
+		}
+		b.WriteString(styled)
 		b.WriteString("\n")
 	}
 	m.viewport.SetContent(b.String())
 }
 
 func (m *ChatModel) View() string {
-	var b strings.Builder
-	b.WriteString(m.viewport.View())
-	b.WriteString("\n")
-	b.WriteString(m.input.View())
-	b.WriteString("\n\n(ctrl+c to quit, ↑/↓ to scroll)")
-	return b.String()
-}
+	if !m.ready {
+		return "Loading..."
+	}
 
-func wrapText(text string, width int) string {
-	if width <= 0 {
-		return text
-	}
-	var result strings.Builder
-	remaining := text
-	for len(remaining) > width {
-		// Find a space to break at
-		split := width
-		for split > 0 && split < len(remaining) && remaining[split] != ' ' {
-			split--
-		}
-		if split == 0 {
-			split = width
-		}
-		result.WriteString(remaining[:split])
-		result.WriteString("\n")
-		remaining = strings.TrimSpace(remaining[split:])
-	}
-	result.WriteString(remaining)
-	return result.String()
+	header := headerStyle.Render("Liberida Chat")
+	viewportView := viewportBorderStyle.Render(m.viewport.View())
+	inputView := inputBorderStyle.Render(m.input.View())
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, viewportView, inputView)
 }
 
 func (m *ChatModel) startAIResponse(userInput string) {
