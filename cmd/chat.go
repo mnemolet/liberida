@@ -118,7 +118,7 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 
 	// Create TUI model
 	model := tui.NewChatModel(cfg, prov, dbManager, exec, sessID, systemMsgContent, initialMessages, ctx, cancel)
-	program := tea.NewProgram(model)
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetProgram(program)
 
 	if _, err := program.Run(); err != nil {
