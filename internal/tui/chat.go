@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mnemolet/liberida/internal/config"
 	"github.com/mnemolet/liberida/internal/db"
@@ -30,6 +31,8 @@ type ChatModel struct {
 	fullResponse   strings.Builder
 	messageHistory []provider.Message // full conversation (system + user + assistant)
 	terminalWidth  int
+	terminalHeight int
+	viewport       viewport.Model
 	titleGenerated bool
 }
 
@@ -57,6 +60,8 @@ func NewChatModel(
 	}
 	history = append(history, initialMessages...)
 
+	vp := viewport.New(80, 20)
+
 	return &ChatModel{
 		input:          input,
 		messages:       []string{}, // will be populated from initialMessages later
@@ -72,6 +77,8 @@ func NewChatModel(
 		fullResponse:   strings.Builder{},
 		messageHistory: history,
 		terminalWidth:  80,
+		terminalHeight: 24,
+		viewport:       vp,
 		titleGenerated: false,
 	}
 }
@@ -107,8 +114,21 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Start AI response in background
 				go m.startAIResponse(userInput)
+				m.updateViewportContent()
 				return m, nil
 			}
+		case "up":
+			m.viewport.LineUp(1)
+			return m, nil
+		case "down":
+			m.viewport.LineDown(1)
+			return m, nil
+		case "pgup":
+			m.viewport.HalfViewUp()
+			return m, nil
+		case "pgdown":
+			m.viewport.HalfViewDown()
+			return m, nil
 		}
 	case string:
 		// AI response chunk – append to the last AI message line
@@ -126,16 +146,22 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Fallback (should not happen)
 			m.messages = append(m.messages, "AI: "+msg)
 		}
+		m.updateViewportContent()
 		return m, nil
 	case error:
 		if m.waiting {
 			m.messages[len(m.messages)-1] = "AI: [Error] " + msg.Error()
 			m.waiting = false
 		}
+		m.updateViewportContent()
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.terminalWidth = msg.Width
+		m.terminalHeight = msg.Height
 		m.input.Width = msg.Width - 4
+		m.viewport.Width = msg.Width
+		m.viewport.Height = msg.Height - 4
+		m.updateViewportContent()
 		return m, nil
 	}
 
@@ -144,10 +170,10 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *ChatModel) View() string {
+func (m *ChatModel) updateViewportContent() {
 	var b strings.Builder
 	width := m.terminalWidth
-	if width < 40 { // min width for wrapping
+	if width < 40 {
 		width = 40
 	}
 	for _, msg := range m.messages {
@@ -155,9 +181,15 @@ func (m *ChatModel) View() string {
 		b.WriteString(wrapped)
 		b.WriteString("\n")
 	}
+	m.viewport.SetContent(b.String())
+}
+
+func (m *ChatModel) View() string {
+	var b strings.Builder
+	b.WriteString(m.viewport.View())
 	b.WriteString("\n")
 	b.WriteString(m.input.View())
-	b.WriteString("\n\n(ctrl+c to quit)")
+	b.WriteString("\n\n(ctrl+c to quit, ↑/↓ to scroll)")
 	return b.String()
 }
 
