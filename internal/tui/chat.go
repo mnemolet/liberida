@@ -158,16 +158,16 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "up":
-			m.viewport.LineUp(1)
+			m.viewport.ScrollUp(1)
 			return m, nil
 		case "down":
-			m.viewport.LineDown(1)
+			m.viewport.ScrollDown(1)
 			return m, nil
 		case "pgup":
-			m.viewport.HalfViewUp()
+			m.viewport.HalfPageUp()
 			return m, nil
 		case "pgdown":
-			m.viewport.HalfViewDown()
+			m.viewport.HalfPageDown()
 			return m, nil
 		}
 	case string:
@@ -201,8 +201,10 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.terminalWidth = msg.Width
 		m.terminalHeight = msg.Height
 
-		vpWidth := msg.Width - viewportBorderStyle.GetHorizontalBorderSize()
-		vpHeight := msg.Height - headerHeight - footerHeight - viewportBorderStyle.GetVerticalBorderSize()
+		// FrameSize includes Borders + Padding + Margin.
+		// We subtract the frame size so the INTERNAL content leaves room for the border.
+		vpWidth := msg.Width - viewportBorderStyle.GetHorizontalFrameSize()
+		vpHeight := msg.Height - headerHeight - footerHeight - viewportBorderStyle.GetVerticalFrameSize()
 
 		if !m.ready {
 			m.viewport = viewport.New(vpWidth, vpHeight)
@@ -212,7 +214,8 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Height = vpHeight
 		}
 
-		m.input.Width = msg.Width - inputBorderStyle.GetHorizontalBorderSize()
+		// We must subtract the frame size plus the prompt length (e.g., "> ")
+		m.input.Width = msg.Width - inputBorderStyle.GetHorizontalFrameSize() - 3
 		m.updateViewportContent()
 		m.viewport.GotoBottom()
 		return m, nil
