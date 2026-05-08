@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,7 +19,7 @@ import (
 )
 
 type ChatModel struct {
-	input          textinput.Model
+	input          textarea.Model
 	messages       []string
 	sessionID      uint
 	cfg            *config.Config
@@ -54,11 +55,12 @@ var (
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("63")).
 				Padding(0, 1)
-
 	inputBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("63")).
-				Padding(0, 1)
+				BorderForeground(lipgloss.Color("240"))
+
+	inputFocusedStyle = inputBorderStyle.
+				BorderForeground(lipgloss.Color("205"))
 
 	userMsgStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("86")).
@@ -89,8 +91,10 @@ func NewChatModel(
 	ctx context.Context,
 	cancel context.CancelFunc,
 ) *ChatModel {
-	input := textinput.New()
+	input := textarea.New()
 	input.Placeholder = "Type your message..."
+	input.ShowLineNumbers = false
+	input.FocusedStyle.CursorLine = lipgloss.NewStyle() // Fixes the double-spacing look
 	input.Focus()
 	input.CharLimit = 0
 
@@ -214,10 +218,17 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		chatWidth := msg.Width - sidebarWidth
 
-		// FrameSize includes Borders + Padding + Margin.
+		// Textarea needs to know its physical limit to wrap text
+		// The internal width is total width minus the 2 border lines
+		m.input.SetWidth(chatWidth - 2)
+		m.input.SetHeight(3)
+		m.input.MaxHeight = 3
+
 		// We subtract the frame size so the INTERNAL content leaves room for the border.
 		vpWidth := chatWidth - viewportBorderStyle.GetHorizontalFrameSize()
-		vpHeight := msg.Height - headerHeight - footerHeight - viewportBorderStyle.GetVerticalFrameSize()
+
+		// VpHeight math: Total - Header(1) - Input(3) - InputBorders(2) - VpBorders(2)
+		vpHeight := msg.Height - headerHeight - 3 - 2 - viewportBorderStyle.GetVerticalFrameSize()
 
 		if !m.ready {
 			m.viewport = viewport.New(vpWidth, vpHeight)
@@ -227,8 +238,6 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Height = vpHeight
 		}
 
-		// We must subtract the frame size plus the prompt length (e.g., "> ")
-		m.input.Width = chatWidth - inputBorderStyle.GetHorizontalFrameSize() - 3
 		m.updateViewportContent()
 		m.viewport.GotoBottom()
 		return m, nil
@@ -263,30 +272,38 @@ func (m *ChatModel) View() string {
 	chatWidth := m.terminalWidth - sidebarWidth
 
 	// Render Columns as usual
-	header := headerStyle.Width(chatWidth).Render("Liberida Chat")
-	vpView := viewportBorderStyle.Width(chatWidth - viewportBorderStyle.GetHorizontalFrameSize()).Render(m.viewport.View())
-	inputView := inputBorderStyle.Width(chatWidth - inputBorderStyle.GetHorizontalFrameSize()).Render(m.input.View())
-	mainCol := lipgloss.JoinVertical(lipgloss.Left, header, vpView, inputView)
+	header := headerStyle.Width(chatWidth).Render("Liberida")
+	vpView := viewportBorderStyle.Render(m.viewport.View())
 
-	// Prepare Sidebar with explicit height to match chat
+	// Select style based on focus
+	style := inputBorderStyle
+	if m.input.Focused() {
+		style = inputFocusedStyle
+	}
+
+	inputView := style.
+		Width(chatWidth - 2).
+		Height(3).
+		Render(m.input.View())
+
+	mainCol := lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		vpView,
+		inputView,
+	)
+
+	// Sidebar
 	sideCol := sidebarBorderStyle.
-		Width(sidebarWidth - sidebarBorderStyle.GetHorizontalFrameSize()).
-		Height(m.terminalHeight - sidebarBorderStyle.GetVerticalFrameSize()).
+		Width(sidebarWidth - 2).
+		Height(m.terminalHeight - 2).
 		Render(m.renderSidebarContent())
-
-	// The main column is in a fixed-width container.
-	// This ensures mainCol CANNOT push the sidebar, even if content is buggy.
-	chatContainer := lipgloss.NewStyle().
-		Width(chatWidth).
-		MaxWidth(chatWidth).
-		Render(mainCol)
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, chatContainer, sideCol)
+	return lipgloss.JoinHorizontal(lipgloss.Top, mainCol, sideCol)
 }
 
 func (m *ChatModel) renderSidebarContent() string {
 	var sb strings.Builder
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Underline(true).Render("SESSION INFO"))
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Underline(true).Render("Session"))
 	sb.WriteString("\n\n")
 
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Model:"))
