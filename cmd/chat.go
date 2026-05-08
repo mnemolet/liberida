@@ -41,10 +41,6 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 		cancel()
 	}()
 
-	fmt.Printf("Starting chat session with %s (model: %s)\n", prov.Name(), cfg.Model)
-	fmt.Println("Type '/exit' or '/quit' to end the session.")
-	fmt.Println("------------------------------------------------")
-
 	dbManager, exec, err := initializeResources(cfg)
 	if err != nil {
 		return fmt.Errorf("[ERROR]: %w", err)
@@ -125,14 +121,21 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 		return fmt.Errorf("TUI error: %w", err)
 	}
 
-	// Reload session to get updated title (may have been auto-generated)
-	finalSession, err := dbManager.GetSession(currentSession.ID)
+	msgs, err := dbManager.GetMessages(currentSession.ID)
 	if err != nil {
-		return fmt.Errorf("failed to reload session: %w", err)
+		return fmt.Errorf("failed to check session messages: %w", err)
 	}
 
-	fmt.Printf("\n%s\n", finalSession.Title)
-	fmt.Printf("liberida --session %d\n", finalSession.ID)
+	// Only print the summary if there are messages.
+	// If len(msgs) == 0, the deferred janitor will delete it, and we stay silent.
+	if len(msgs) > 0 {
+		finalSession, err := dbManager.GetSession(currentSession.ID)
+		if err != nil {
+			return fmt.Errorf("failed to reload session: %w", err)
+		}
+		fmt.Printf("%s\n", finalSession.Title)
+		fmt.Printf("liberida --session %d\n", finalSession.ID)
+	}
 
 	return nil
 }
