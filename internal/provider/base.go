@@ -81,14 +81,15 @@ func GenericStream(
 				}
 
 				if done {
-					goto finalize
+					break
 				}
 			}
 		}
 
-	finalize:
 		if len(accumulatedTools) > 0 {
 			toolChan <- accumulatedTools
+		} else {
+			toolChan <- nil // Always send something to avoid hanging <-toolChan
 		}
 		usageChan <- lastUsage
 	}()

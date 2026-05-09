@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mnemolet/liberida/internal/config"
 	"github.com/mnemolet/liberida/internal/db"
 	"github.com/mnemolet/liberida/internal/executor"
@@ -16,7 +19,7 @@ import (
 )
 
 type ChatModel struct {
-	input          textinput.Model
+	input          textarea.Model
 	messages       []string
 	sessionID      uint
 	cfg            *config.Config
@@ -30,8 +33,52 @@ type ChatModel struct {
 	fullResponse   strings.Builder
 	messageHistory []provider.Message // full conversation (system + user + assistant)
 	terminalWidth  int
+	terminalHeight int
+	viewport       viewport.Model
 	titleGenerated bool
+	ready          bool
+	lastUsage      provider.Usage
 }
+
+const (
+	headerHeight = 1
+	footerHeight = 3
+)
+
+var (
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("205")).
+			Padding(0, 1)
+
+	viewportBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("63")).
+				Padding(0, 1)
+	inputBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("240"))
+
+	inputFocusedStyle = inputBorderStyle.
+				BorderForeground(lipgloss.Color("205"))
+
+	userMsgStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("86")).
+			Bold(true)
+
+	aiMsgStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("212"))
+
+	sidebarBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("240"))
+)
+
+const (
+	sidebarWidth = 30
+)
+
+type usageUpdateMsg provider.Usage
 
 func NewChatModel(
 	cfg *config.Config,
@@ -44,11 +91,12 @@ func NewChatModel(
 	ctx context.Context,
 	cancel context.CancelFunc,
 ) *ChatModel {
-	input := textinput.New()
+	input := textarea.New()
 	input.Placeholder = "Type your message..."
+	input.ShowLineNumbers = false
+	input.FocusedStyle.CursorLine = lipgloss.NewStyle() // Fixes the double-spacing look
 	input.Focus()
 	input.CharLimit = 0
-	input.Width = 80
 
 	// Prepend system message to history
 	history := make([]provider.Message, 0, len(initialMessages)+1)
@@ -57,9 +105,19 @@ func NewChatModel(
 	}
 	history = append(history, initialMessages...)
 
+	// Populate initial messages for display
+	displayMessages := make([]string, 0, len(initialMessages))
+	for _, msg := range initialMessages {
+		if msg.Role == "user" {
+			displayMessages = append(displayMessages, fmt.Sprintf("You: %s", msg.Content))
+		} else if msg.Role == "assistant" {
+			displayMessages = append(displayMessages, fmt.Sprintf("AI: %s", msg.Content))
+		}
+	}
+
 	return &ChatModel{
 		input:          input,
-		messages:       []string{}, // will be populated from initialMessages later
+		messages:       displayMessages,
 		sessionID:      sessionID,
 		cfg:            cfg,
 		prov:           prov,
@@ -71,8 +129,11 @@ func NewChatModel(
 		prog:           nil,
 		fullResponse:   strings.Builder{},
 		messageHistory: history,
-		terminalWidth:  80,
+		terminalWidth:  0,
+		terminalHeight: 0,
+		viewport:       viewport.New(0, 0),
 		titleGenerated: false,
+		ready:          false,
 	}
 }
 
@@ -107,8 +168,22 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Start AI response in background
 				go m.startAIResponse(userInput)
+				m.updateViewportContent()
+				m.viewport.GotoBottom()
 				return m, nil
 			}
+		case "up":
+			m.viewport.ScrollUp(1)
+			return m, nil
+		case "down":
+			m.viewport.ScrollDown(1)
+			return m, nil
+		case "pgup":
+			m.viewport.HalfPageUp()
+			return m, nil
+		case "pgdown":
+			m.viewport.HalfPageDown()
+			return m, nil
 		}
 	case string:
 		// AI response chunk – append to the last AI message line
@@ -126,16 +201,48 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Fallback (should not happen)
 			m.messages = append(m.messages, "AI: "+msg)
 		}
+		m.updateViewportContent()
+		m.viewport.GotoBottom()
 		return m, nil
 	case error:
 		if m.waiting {
 			m.messages[len(m.messages)-1] = "AI: [Error] " + msg.Error()
 			m.waiting = false
 		}
+		m.updateViewportContent()
+		m.viewport.GotoBottom()
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.terminalWidth = msg.Width
-		m.input.Width = msg.Width - 4
+		m.terminalHeight = msg.Height
+
+		chatWidth := msg.Width - sidebarWidth
+
+		// Textarea needs to know its physical limit to wrap text
+		// The internal width is total width minus the 2 border lines
+		m.input.SetWidth(chatWidth - 2)
+		m.input.SetHeight(3)
+		m.input.MaxHeight = 3
+
+		// We subtract the frame size so the INTERNAL content leaves room for the border.
+		vpWidth := chatWidth - viewportBorderStyle.GetHorizontalFrameSize()
+
+		// VpHeight math: Total - Header(1) - Input(3) - InputBorders(2) - VpBorders(2)
+		vpHeight := msg.Height - headerHeight - 3 - 2 - viewportBorderStyle.GetVerticalFrameSize()
+
+		if !m.ready {
+			m.viewport = viewport.New(vpWidth, vpHeight)
+			m.ready = true
+		} else {
+			m.viewport.Width = vpWidth
+			m.viewport.Height = vpHeight
+		}
+
+		m.updateViewportContent()
+		m.viewport.GotoBottom()
+		return m, nil
+	case usageUpdateMsg:
+		m.lastUsage = provider.Usage(msg)
 		return m, nil
 	}
 
@@ -144,44 +251,73 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *ChatModel) View() string {
+func (m *ChatModel) updateViewportContent() {
 	var b strings.Builder
-	width := m.terminalWidth
-	if width < 40 { // min width for wrapping
-		width = 40
-	}
+	// Subtract frame size to ensure text doesn't touch the borders
+	availableWidth := m.viewport.Width - 2
+
 	for _, msg := range m.messages {
-		wrapped := wrapText(msg, width)
-		b.WriteString(wrapped)
-		b.WriteString("\n")
+		// Cleanly wrap the text to the viewport width
+		wrapped := lipgloss.NewStyle().Width(availableWidth).Render(msg)
+		b.WriteString(wrapped + "\n")
 	}
-	b.WriteString("\n")
-	b.WriteString(m.input.View())
-	b.WriteString("\n\n(ctrl+c to quit)")
-	return b.String()
+	m.viewport.SetContent(b.String())
 }
 
-func wrapText(text string, width int) string {
-	if width <= 0 {
-		return text
+func (m *ChatModel) View() string {
+	if !m.ready {
+		return "Loading..."
 	}
-	var result strings.Builder
-	remaining := text
-	for len(remaining) > width {
-		// Find a space to break at
-		split := width
-		for split > 0 && split < len(remaining) && remaining[split] != ' ' {
-			split--
-		}
-		if split == 0 {
-			split = width
-		}
-		result.WriteString(remaining[:split])
-		result.WriteString("\n")
-		remaining = strings.TrimSpace(remaining[split:])
+
+	chatWidth := m.terminalWidth - sidebarWidth
+
+	// Render Columns as usual
+	header := headerStyle.Width(chatWidth).Render("Liberida")
+	vpView := viewportBorderStyle.Render(m.viewport.View())
+
+	// Select style based on focus
+	style := inputBorderStyle
+	if m.input.Focused() {
+		style = inputFocusedStyle
 	}
-	result.WriteString(remaining)
-	return result.String()
+
+	inputView := style.
+		Width(chatWidth - 2).
+		Height(3).
+		Render(m.input.View())
+
+	mainCol := lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		vpView,
+		inputView,
+	)
+
+	// Sidebar
+	sideCol := sidebarBorderStyle.
+		Width(sidebarWidth - 2).
+		Height(m.terminalHeight - 2).
+		Render(m.renderSidebarContent())
+	return lipgloss.JoinHorizontal(lipgloss.Top, mainCol, sideCol)
+}
+
+func (m *ChatModel) renderSidebarContent() string {
+	var sb strings.Builder
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Underline(true).Render("Session"))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Model:"))
+	sb.WriteString(fmt.Sprintf("\n%s\n\n", m.cfg.Model))
+
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Tokens:"))
+	sb.WriteString(fmt.Sprintf("\nPrompt: %d", m.lastUsage.PromptTokens))
+	sb.WriteString(fmt.Sprintf("\nCompl:  %d", m.lastUsage.CompletionTokens))
+	sb.WriteString(fmt.Sprintf("\nTotal:  %d\n\n", m.lastUsage.TotalTokens))
+
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Cost:"))
+	sb.WriteString(fmt.Sprintf("\n$%.6f", m.lastUsage.EstimatedCost))
+
+	return sb.String()
 }
 
 func (m *ChatModel) startAIResponse(userInput string) {
@@ -306,10 +442,7 @@ func (m *ChatModel) startAIResponse(userInput string) {
 
 	// Handle Usage Display
 	usage := <-usageChan
-	if usage.TotalTokens > 0 && m.cfg.ShowUsage {
-		m.prog.Send(fmt.Sprintf("\n[Tokens: %d prompt, %d completion, %d total | Cost: $%.6f]\n",
-			usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.EstimatedCost))
-	}
+	m.prog.Send(usageUpdateMsg(usage))
 
 	m.waiting = false
 }

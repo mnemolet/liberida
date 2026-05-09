@@ -159,11 +159,15 @@ func (p *OpenRouterProvider) Stream(
 			return "", nil, nil, false
 		}
 
+		// If usage is present but choices are empty (common in final chunk)
 		if len(chunk.Choices) == 0 {
-			return "", nil, chunk.Usage, false
+			// If we have usage, this is likely the end or a meta-chunk
+			return "", nil, chunk.Usage, chunk.Usage != nil
 		}
 
 		choice := chunk.Choices[0]
+		// Return the content/tools, the usage (if present in this chunk),
+		// and true if finish_reason is set
 		return choice.Delta.Content, choice.Delta.ToolCalls, chunk.Usage, choice.FinishReason != ""
 	})
 }
