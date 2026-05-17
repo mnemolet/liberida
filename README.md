@@ -10,6 +10,7 @@ A local AI agent CLI that runs on your machine using Ollama or OpenRouter. Chat 
 - **Workspace Context**: Automatically includes your project files in context (optional)
 - **TUI Interface**: Interactive terminal-based chat interface
 - **Export**: Export conversations to Markdown or JSON
+- **Non-Interactive Mode**: Script-friendly with stdin piping and quiet output
 
 ## Requirements
 
@@ -57,6 +58,38 @@ make test-coverage
 # Resume an existing session by ID
 ./bin/liberida -s 5
 ```
+
+### Non-Interactive Mode (Scripting)
+
+Use Liberida in scripts, pipelines, and automation. If stdin or trailing arguments are provided, the TUI is skipped and the response is printed directly.
+
+```bash
+# Trailing arguments as prompt
+./bin/liberida "What is 2+2?"
+
+# Pipe context via stdin
+echo "function add(a, b) { return a + b; }" | ./bin/liberida "Explain this code"
+
+# Combine stdin context with trailing prompt
+cat file.go | ./bin/liberida "What does this do?"
+
+# Quiet mode: only raw response to stdout, no metadata
+./bin/liberida -q "What is Go?"
+
+# Pipe context from file
+cat error.log | ./bin/liberida -q "What's the issue?"
+
+# Use with Unix tools (grep, jq, etc.)
+./bin/liberida -q "list files" | grep ".go"
+```
+
+The `--quiet` or `-q` flag suppresses:
+- Model information
+- Token counts
+- Status messages
+- All stderr output
+
+Perfect for CI/CD pipelines and shell scripts.
 
 ### Attaching Files
 
