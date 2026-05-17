@@ -1,40 +1,131 @@
-# liberida
+# Liberida
 
-## Exporting Conversations
+A local AI agent CLI that runs on your machine using Ollama or OpenRouter. Chat with an AI assistant that can read, write, and execute commands in your workspace.
 
-The export command allows you to save your chat conversations in different formats for sharing, backup, or analysis.
+## Features
 
-### Commands
+- **Local AI Execution**: Runs locally using Ollama or cloud via OpenRouter
+- **Tool Calling**: AI can read/write files and run shell commands in your workspace
+- **Session Management**: Resume previous conversations or start fresh
+- **Workspace Context**: Automatically includes your project files in context (optional)
+- **TUI Interface**: Interactive terminal-based chat interface
+- **Export**: Export conversations to Markdown or JSON
 
-#### Export Current Session
+## Requirements
+
+- Go 1.24 or later
+- [Ollama](https://github.com/ollama/ollama) (for local models)
+- Optional: OpenRouter API key (for cloud models)
+
+## Building
+
+```bash
+# Clone the repository
+git clone https://github.com/mnemolet/liberida.git
+cd liberida
+
+# Build the binary
+make build
+
+# Or directly with Go
+go build -o bin/liberida ./cmd
 ```
-# Export the most recent session to stdout (default: md format)
-liberida export current
 
-# Export to markdown file
-liberida export current --format md --output my-conversation
+The binary will be available at `bin/liberida`.
 
-# Export to JSON file
-liberida export current --format json --output my-conversation.json
+## Testing
+
+```bash
+# Run all tests
+make test
+
+# Run tests with coverage report
+make test-coverage
 ```
 
-#### Export Specific Session
-```
-# Export session by ID to stdout
-liberida export session 5
+## Usage
 
-# Export session 5 to markdown file
-liberida export session 5 --format md --output session-5
+### Basic Chat
 
-# Export session 5 to JSON
-liberida export session 5 --format json --output session-5.json
+```bash
+# Start a new chat session (uses Ollama by default with llama3.2)
+./bin/liberida
+
+# Start with a specific model
+./bin/liberida --new
+
+# Resume an existing session by ID
+./bin/liberida -s 5
 ```
 
-#### Export All Sessions
-```
-# Export all sessions to markdown files (creates export-session-1.md, export-session-2.md, etc.)
-liberida export all --output export
+### Configuration
 
-# Export all sessions to JSON files
-liberida export all --format json --output export
+Configuration is stored in `~/.liberida/config.toml`. On first run, a default config is created.
+
+```bash
+# View current configuration
+./bin/liberida show-config
 ```
+
+Key configuration options:
+- `provider`: "ollama" (default) or "openrouter"
+- `model`: LLM model to use
+- `ollama_url`: Ollama server URL (default: http://localhost:11434)
+- `openrouter_api_key`: Your OpenRouter API key
+- `auto_context`: Include workspace files in context
+- `auto_title`: Auto-generate session titles
+
+### Session Management
+
+```bash
+# List all sessions
+./bin/liberida sessions list
+
+# Delete a session
+./bin/liberida sessions delete 5
+```
+
+### Usage Statistics
+
+```bash
+# Show usage for current session
+./bin/liberida usage --session 5
+
+# Show total usage across all sessions
+./bin/liberida usage total
+```
+
+### Exporting Conversations
+
+```bash
+# Export current session to stdout (markdown)
+./bin/liberida export current
+
+# Export to file
+./bin/liberida export current --output my-chat --format md
+
+# Export specific session
+./bin/liberida export session 5 --output session-5 --format json
+
+# Export all sessions
+./bin/liberida export all --output backups
+```
+
+### Using OpenRouter
+
+To use cloud models via OpenRouter:
+
+1. Get an API key from https://openrouter.ai/keys
+2. Update config:
+
+```toml
+provider = "openrouter"
+openrouter_api_key = "sk-or-..."
+model = "qwen/qwen3-coder:free"
+```
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+
+Copyright 2024 Liberida Contributors
