@@ -58,6 +58,37 @@ make test-coverage
 ./bin/liberida -s 5
 ```
 
+### Attaching Files
+
+Attach files to include their content in the conversation context. Useful for asking the AI to analyze, explain, or work with specific files.
+
+```bash
+# Attach a single file
+./bin/liberida --attach README.md
+
+# Attach multiple files using repeated flags
+./bin/liberida -a error.log -a config.yaml --new
+
+# Attach multiple files using comma-separated values
+./bin/liberida -a "main.go,utils.go" --new
+
+# Combine with session resume
+./bin/liberida -s 5 --attach debug.log
+
+# Disable automatic workspace context but keep attachments
+./bin/liberida --no-context --attach report.md --new
+```
+
+Supported file types:
+- Text formats: `.txt`, `.log`, `.md`, `.json`, `.yaml`, `.yml`, `.toml`
+- Source code: `.go`, `.py`, `.js`, `.ts`, `.java`, `.c`, `.cpp`, `.rs`, `.rb`, `.php`, etc.
+- Config files: `.env`, `.ini`, `.cfg`, `.conf`, `.sh`, `.bash`
+
+Constraints:
+- Maximum file size: 2MB per file
+- Files must exist and be regular files (directories not supported)
+- Symlinks are followed automatically
+
 ### Configuration
 
 Configuration is stored in `~/.liberida/config.toml`. On first run, a default config is created.
