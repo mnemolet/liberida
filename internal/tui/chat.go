@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -16,6 +18,7 @@ import (
 	"github.com/mnemolet/liberida/internal/executor"
 	"github.com/mnemolet/liberida/internal/llm"
 	"github.com/mnemolet/liberida/internal/provider"
+	"github.com/mnemolet/liberida/internal/version"
 )
 
 type ChatModel struct {
@@ -47,7 +50,6 @@ const (
 
 var (
 	headerStyle = lipgloss.NewStyle().
-			Bold(true).
 			Foreground(lipgloss.Color("205")).
 			Padding(0, 1)
 
@@ -228,7 +230,7 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		vpWidth := chatWidth - viewportBorderStyle.GetHorizontalFrameSize()
 
 		// VpHeight math: Total - Header(1) - Input(3) - InputBorders(2) - VpBorders(2)
-		vpHeight := msg.Height - headerHeight - 3 - 2 - viewportBorderStyle.GetVerticalFrameSize()
+		vpHeight := msg.Height - 3 - 2 - viewportBorderStyle.GetVerticalFrameSize()
 
 		if !m.ready {
 			m.viewport = viewport.New(vpWidth, vpHeight)
@@ -272,7 +274,6 @@ func (m *ChatModel) View() string {
 	chatWidth := m.terminalWidth - sidebarWidth
 
 	// Render Columns as usual
-	header := headerStyle.Width(chatWidth).Render("Liberida")
 	vpView := viewportBorderStyle.Render(m.viewport.View())
 
 	// Select style based on focus
@@ -288,7 +289,6 @@ func (m *ChatModel) View() string {
 
 	mainCol := lipgloss.JoinVertical(
 		lipgloss.Left,
-		header,
 		vpView,
 		inputView,
 	)
@@ -303,6 +303,26 @@ func (m *ChatModel) View() string {
 
 func (m *ChatModel) renderSidebarContent() string {
 	var sb strings.Builder
+
+	// Build the dynamic version string
+	displayVersion := version.Version
+	if displayVersion == "dev" && version.Commit != "none" {
+		// If running a dev build, append the short commit hash for precision
+		shortCommit := version.Commit
+		if len(shortCommit) > 7 {
+			shortCommit = shortCommit[:7]
+		}
+		displayVersion = fmt.Sprintf("dev-%s", shortCommit)
+	} else if !strings.HasPrefix(displayVersion, "v") && displayVersion != "dev" {
+		displayVersion = "v" + displayVersion
+	}
+
+	// App name
+	versionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
+	titleText := fmt.Sprintf("%s %s", headerStyle.Render("Liberida"), versionStyle.Render(displayVersion))
+	sb.WriteString(titleText)
+	sb.WriteString("\n" + strings.Repeat("─", sidebarWidth-4) + "\n\n")
+
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Underline(true).Render("Session"))
 	sb.WriteString("\n\n")
 
@@ -316,6 +336,32 @@ func (m *ChatModel) renderSidebarContent() string {
 
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Cost:"))
 	sb.WriteString(fmt.Sprintf("\n$%.6f", m.lastUsage.EstimatedCost))
+
+	// Environment Workspace Stats (Directory & Git Branch)
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Underline(true).Render("Workspace"))
+	sb.WriteString("\n\n")
+
+	// Get Working Directory
+	dir, err := os.Getwd()
+	if err != nil {
+		dir = "Unknown"
+	} else {
+		parts := strings.Split(dir, string(os.PathSeparator))
+		if len(parts) > 2 {
+			dir = strings.Join(parts[len(parts)-2:], string(os.PathSeparator))
+		}
+	}
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Directory:"))
+	sb.WriteString(fmt.Sprintf("\n%s\n\n", dir))
+
+	// Get Git Branch Name
+	branch := "Not a repository"
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	if output, err := cmd.Output(); err == nil {
+		branch = strings.TrimSpace(string(output))
+	}
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Branch:"))
+	sb.WriteString(fmt.Sprintf("\n%s\n", branch))
 
 	return sb.String()
 }
