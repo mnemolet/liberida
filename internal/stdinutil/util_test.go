@@ -57,3 +57,21 @@ func TestReadAllTrimmedWithInput(t *testing.T) {
 		t.Error("expected non-empty trimmed input")
 	}
 }
+
+func TestReadAllTrimmed_TrimsWhitespace(t *testing.T) {
+	origStat, _ := os.Stdin.Stat()
+	if origStat.Mode()&os.ModeCharDevice != 0 {
+		t.Skip("stdin is not piped in test environment")
+	}
+
+	data, err := ReadAllTrimmed()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if len(data) > 0 {
+		if data[0] == ' ' || data[len(data)-1] == ' ' {
+			t.Error("expected trimmed whitespace")
+		}
+	}
+}
