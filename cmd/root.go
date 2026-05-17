@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var attachFiles []string
+
 var rootCmd = &cobra.Command{
 	Use:     "liberida",
 	Short:   "LiberIda - local AI Agent",
@@ -33,7 +35,7 @@ var rootCmd = &cobra.Command{
 			cfg.AutoContext = false
 		}
 
-		return runChatSession(prov, cfg, sessionID, forceNew)
+		return runChatSession(prov, cfg, sessionID, forceNew, attachFiles)
 	},
 }
 
@@ -49,4 +51,5 @@ func init() {
 	rootCmd.PersistentFlags().UintP("session", "s", 0, "Resume existing session by ID")
 	rootCmd.PersistentFlags().Bool("new", false, "Force create new session (ignore --session)")
 	rootCmd.PersistentFlags().Bool("no-context", false, "Disable automatic workspace context")
+	rootCmd.PersistentFlags().StringArrayVarP(&attachFiles, "attach", "a", nil, "Attach files to the conversation (can be repeated or comma-separated)")
 }
