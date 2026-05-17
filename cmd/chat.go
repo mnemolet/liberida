@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mnemolet/liberida/internal/attachment"
 	"github.com/mnemolet/liberida/internal/config"
 	workspace "github.com/mnemolet/liberida/internal/context"
 	"github.com/mnemolet/liberida/internal/db"
@@ -29,7 +30,7 @@ func createProvider(cfg *config.Config) (provider.Provider, error) {
 	}
 }
 
-func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, forceNew bool) error {
+func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, forceNew bool, attachFiles []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -94,6 +95,19 @@ func runChatSession(prov provider.Provider, cfg *config.Config, sessionID uint, 
 
 	if contextStr != "" {
 		systemMsgContent = fmt.Sprintf("%s\n\n%s", systemMsgContent, contextStr)
+	}
+
+	// Process attached files
+	if len(attachFiles) > 0 {
+		handler := attachment.NewHandler()
+		components, errs := handler.ProcessPaths(attachFiles)
+		for _, err := range errs {
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+		}
+		if len(components) > 0 {
+			attachStr := handler.FormatComponents(components)
+			systemMsgContent = fmt.Sprintf("%s\n\n%s", systemMsgContent, attachStr)
+		}
 	}
 
 	// Build initial messages from existing session (excluding system message)
