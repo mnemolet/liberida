@@ -151,7 +151,7 @@ func (s *WorkspaceScanner) CollectContext(exec executor.Executor, workspaceDir s
 		result.WriteString("Text Files:\n")
 		result.WriteString("-------------\n")
 		for _, f := range textFiles {
-			result.WriteString(fmt.Sprintf("\n=== %s ===\n", f.Path))
+			result.WriteString("\n=== " + f.Path + " ===\n")
 			result.WriteString(f.Content)
 			result.WriteString("\n")
 		}
@@ -162,7 +162,7 @@ func (s *WorkspaceScanner) CollectContext(exec executor.Executor, workspaceDir s
 	if len(binaryFiles) > 0 {
 		result.WriteString("Binary Files (content not shown):\n")
 		for _, f := range binaryFiles {
-			result.WriteString(fmt.Sprintf("  - %s\n", f))
+			result.WriteString("  - " + f + "\n")
 		}
 		result.WriteString("\n")
 	}
@@ -171,7 +171,7 @@ func (s *WorkspaceScanner) CollectContext(exec executor.Executor, workspaceDir s
 	if len(largeFiles) > 0 {
 		result.WriteString("Large Files (exceeded size limit, content not shown):\n")
 		for _, f := range largeFiles {
-			result.WriteString(fmt.Sprintf("  - %s\n", f))
+			result.WriteString("  - " + f + "\n")
 		}
 		result.WriteString("\n")
 	}

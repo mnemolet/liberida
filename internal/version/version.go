@@ -3,7 +3,6 @@ package version
 import (
 	"fmt"
 	"runtime"
-	"strings"
 )
 
 var (
@@ -22,16 +21,12 @@ var (
 
 // Info returns the complete version information
 func Info() string {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("Version: %s\n", Version))
-	sb.WriteString(fmt.Sprintf("Commit: %s\n", Commit))
-	sb.WriteString(fmt.Sprintf("Built: %s\n", Date))
-	sb.WriteString(fmt.Sprintf("Built by: %s\n", BuiltBy))
-	sb.WriteString(fmt.Sprintf("Go version: %s\n", runtime.Version()))
-	sb.WriteString(fmt.Sprintf("OS/Arch: %s/%s\n", runtime.GOOS, runtime.GOARCH))
-
-	return sb.String()
+	return "Version: " + Version + "\n" +
+		"Commit: " + Commit + "\n" +
+		"Built: " + Date + "\n" +
+		"Built by: " + BuiltBy + "\n" +
+		"Go version: " + runtime.Version() + "\n" +
+		"OS/Arch: " + runtime.GOOS + "/" + runtime.GOARCH + "\n"
 }
 
 // Short returns a short version string
