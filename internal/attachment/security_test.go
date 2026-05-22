@@ -223,3 +223,38 @@ func TestProcessPaths_MixedAllowedAndBlocked(t *testing.T) {
 		t.Errorf("expected 1 error, got %d", len(errs))
 	}
 }
+
+func TestInitWindowsBlocked_NoopOnNonWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test only applies to non-Windows systems")
+	}
+
+	windowsBlockedOnce = false
+	windowsBlockedPrefixes = nil
+
+	initWindowsBlocked()
+
+	if len(windowsBlockedPrefixes) != 0 {
+		t.Errorf("expected 0 Windows blocked prefixes on %s, got %d", runtime.GOOS, len(windowsBlockedPrefixes))
+	}
+	if !windowsBlockedOnce {
+		t.Error("windowsBlockedOnce should be true after init")
+	}
+}
+
+func TestInitWindowsBlocked_Idempotent(t *testing.T) {
+	windowsBlockedOnce = false
+	windowsBlockedPrefixes = nil
+
+	initWindowsBlocked()
+	firstLen := len(windowsBlockedPrefixes)
+
+	windowsBlockedOnce = false
+
+	initWindowsBlocked()
+	secondLen := len(windowsBlockedPrefixes)
+
+	if firstLen != secondLen {
+		t.Errorf("expected same length after second init (%d vs %d)", firstLen, secondLen)
+	}
+}
