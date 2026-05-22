@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -18,7 +19,151 @@ var (
 	ErrNotRegularFile  = errors.New("not a regular file")
 	ErrFileTooLarge    = errors.New("file exceeds maximum size limit")
 	ErrSymlinkLoop     = errors.New("symlink loop detected")
+	ErrSystemFile      = errors.New("system file access denied")
 )
+
+var blockedUnixPrefixes = []string{
+	"/etc/",
+	"/proc/",
+	"/sys/",
+	"/dev/",
+	"/boot/",
+	"/root/",
+	"/run/",
+	"/sbin/",
+	"/bin/",
+	"/lib/",
+	"/lib64/",
+	"/usr/",
+	"/var/",
+	"/opt/",
+	"/snap/",
+	"/lost+found",
+}
+
+var (
+	windowsBlockedPrefixes []string
+	windowsBlockedOnce    bool
+)
+
+var blockedHomeDirs = []string{
+	".ssh",
+	".gnupg",
+	".aws",
+	".gcloud",
+	".kube",
+	".docker",
+	".config/opencode",
+	".config/gcloud",
+	".password-store",
+	".gnome",
+	".vault-token",
+	".netrc",
+}
+
+func initWindowsBlocked() {
+	if windowsBlockedOnce {
+		return
+	}
+	windowsBlockedOnce = true
+
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	systemRoot := os.Getenv("SystemRoot")
+	if systemRoot != "" {
+		systemRoot = filepath.Clean(systemRoot)
+		windowsBlockedPrefixes = append(windowsBlockedPrefixes, systemRoot)
+		windowsBlockedPrefixes = append(windowsBlockedPrefixes, []string{
+			filepath.Join(systemRoot, "System32"),
+			filepath.Join(systemRoot, "System32", "config"),
+			filepath.Join(systemRoot, "System32", "drivers", "etc"),
+			filepath.Join(systemRoot, "System32", "Tasks"),
+			filepath.Join(systemRoot, "System32", "winevt", "Logs"),
+			filepath.Join(systemRoot, "System32", "catroot"),
+			filepath.Join(systemRoot, "System32", "catroot2"),
+			filepath.Join(systemRoot, "SysWOW64"),
+			filepath.Join(systemRoot, "Temp"),
+		}...)
+	}
+
+	programData := os.Getenv("ProgramData")
+	if programData != "" {
+		windowsBlockedPrefixes = append(windowsBlockedPrefixes, filepath.Clean(programData))
+	}
+
+	programFiles := os.Getenv("ProgramFiles")
+	if programFiles != "" {
+		windowsBlockedPrefixes = append(windowsBlockedPrefixes, filepath.Clean(programFiles))
+	}
+
+	programFilesX86 := os.Getenv("ProgramFiles(x86)")
+	if programFilesX86 != "" {
+		windowsBlockedPrefixes = append(windowsBlockedPrefixes, filepath.Clean(programFilesX86))
+	}
+
+	systemDrive := os.Getenv("SystemDrive")
+	if systemDrive != "" {
+		driveRoot := systemDrive + string(filepath.Separator)
+		windowsBlockedPrefixes = append(windowsBlockedPrefixes, []string{
+			filepath.Join(driveRoot, "System Volume Information"),
+			filepath.Join(driveRoot, "$Recycle.Bin"),
+			filepath.Join(driveRoot, "Boot"),
+			filepath.Join(driveRoot, "Recovery"),
+			filepath.Join(driveRoot, "PerfLogs"),
+			filepath.Join(driveRoot, "Documents and Settings"),
+		}...)
+	}
+}
+
+func isBlockedPath(absPath string) (bool, string) {
+	clean := filepath.Clean(absPath)
+
+	switch runtime.GOOS {
+	case "linux", "darwin":
+		for _, prefix := range blockedUnixPrefixes {
+			if strings.HasPrefix(clean, prefix) || clean == prefix[:len(prefix)-1] {
+				return true, prefix[:len(prefix)-1]
+			}
+		}
+	case "windows":
+		initWindowsBlocked()
+		for _, prefix := range windowsBlockedPrefixes {
+			if len(clean) > len(prefix) && clean[len(prefix)] == filepath.Separator &&
+				strings.EqualFold(clean[:len(prefix)], prefix) {
+				return true, prefix
+			}
+			if strings.EqualFold(clean, prefix) {
+				return true, prefix
+			}
+		}
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false, ""
+	}
+
+	for _, dir := range blockedHomeDirs {
+		blocked := filepath.Join(homeDir, dir)
+		if runtime.GOOS == "windows" {
+			if len(clean) > len(blocked) && clean[len(blocked)] == filepath.Separator &&
+				strings.EqualFold(clean[:len(blocked)], blocked) {
+				return true, blocked
+			}
+			if strings.EqualFold(clean, blocked) {
+				return true, blocked
+			}
+		} else {
+			if strings.HasPrefix(clean, blocked+string(filepath.Separator)) || clean == blocked {
+				return true, blocked
+			}
+		}
+	}
+
+	return false, ""
+}
 
 type ContextComponent struct {
 	Name    string
@@ -99,6 +244,10 @@ func (h *Handler) ValidateAndRead(path string) (*ContextComponent, error) {
 		return nil, fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
+	if blocked, match := isBlockedPath(absPath); blocked {
+		return nil, fmt.Errorf("%s: %w", match, ErrSystemFile)
+	}
+
 	info, err := os.Lstat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -112,6 +261,11 @@ func (h *Handler) ValidateAndRead(path string) (*ContextComponent, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, ErrSymlinkLoop)
 		}
+
+		if blocked, match := isBlockedPath(realPath); blocked {
+			return nil, fmt.Errorf("symlink target %s: %w", match, ErrSystemFile)
+		}
+
 		info, err = os.Stat(realPath)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, ErrSymlinkLoop)
