@@ -57,6 +57,7 @@ func GenericStream(
 		var accumulatedTools []ToolCall
 		var lastUsage Usage
 
+	loop:
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -74,8 +75,6 @@ func GenericStream(
 				}
 
 				if len(tools) > 0 {
-					// Stitch tool fragments (Ollama usually sends them whole,
-					// but this logic supports incremental fragments too)
 					for _, tc := range tools {
 						if tc.Index >= len(accumulatedTools) {
 							accumulatedTools = append(accumulatedTools, tc)
@@ -90,7 +89,7 @@ func GenericStream(
 				}
 
 				if done {
-					break
+					break loop
 				}
 			}
 		}

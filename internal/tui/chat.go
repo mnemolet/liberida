@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -43,11 +44,6 @@ type ChatModel struct {
 	lastUsage      provider.Usage
 }
 
-const (
-	headerHeight = 1
-	footerHeight = 3
-)
-
 var (
 	headerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("205")).
@@ -63,13 +59,6 @@ var (
 
 	inputFocusedStyle = inputBorderStyle.
 				BorderForeground(lipgloss.Color("205"))
-
-	userMsgStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("86")).
-			Bold(true)
-
-	aiMsgStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("212"))
 
 	sidebarBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
@@ -110,10 +99,11 @@ func NewChatModel(
 	// Populate initial messages for display
 	displayMessages := make([]string, 0, len(initialMessages))
 	for _, msg := range initialMessages {
-		if msg.Role == "user" {
-			displayMessages = append(displayMessages, fmt.Sprintf("You: %s", msg.Content))
-		} else if msg.Role == "assistant" {
-			displayMessages = append(displayMessages, fmt.Sprintf("AI: %s", msg.Content))
+		switch msg.Role {
+		case "user":
+			displayMessages = append(displayMessages, "You: "+msg.Content)
+		case "assistant":
+			displayMessages = append(displayMessages, "AI: "+msg.Content)
 		}
 	}
 
@@ -327,17 +317,19 @@ func (m *ChatModel) renderSidebarContent() string {
 	sb.WriteString("\n\n")
 
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Model:"))
-	sb.WriteString(fmt.Sprintf("\n%s\n\n", m.cfg.Model))
+	sb.WriteString("\n" + m.cfg.Model + "\n\n")
 
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Tokens:"))
-	sb.WriteString(fmt.Sprintf("\nPrompt: %d", m.lastUsage.PromptTokens))
-	sb.WriteString(fmt.Sprintf("\nCompl:  %d", m.lastUsage.CompletionTokens))
-	sb.WriteString(fmt.Sprintf("\nTotal:  %d\n\n", m.lastUsage.TotalTokens))
+	sb.WriteString("\nPrompt: " + strconv.Itoa(m.lastUsage.PromptTokens))
+	sb.WriteString("\nCompl: " + strconv.Itoa(m.lastUsage.CompletionTokens))
+	sb.WriteString("\nTotal: \n\n" + strconv.Itoa(m.lastUsage.TotalTokens))
 
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Cost:"))
-	sb.WriteString(fmt.Sprintf("\n$%.6f", m.lastUsage.EstimatedCost))
 
-	sb.WriteString(fmt.Sprint("\n\n")) // add whitespace
+	costStr := strconv.FormatFloat(m.lastUsage.EstimatedCost, 'f', 6, 64)
+	sb.WriteString("\n$" + costStr)
+
+	sb.WriteString("\n\n") // add whitespace
 
 	// Environment Workspace Stats (Directory & Git Branch)
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Underline(true).Render("Workspace"))
@@ -354,7 +346,7 @@ func (m *ChatModel) renderSidebarContent() string {
 		}
 	}
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Directory:"))
-	sb.WriteString(fmt.Sprintf("\n%s\n\n", dir))
+	sb.WriteString("\n" + dir + "\n\n")
 
 	// Get Git Branch Name
 	branch := "Not a repository"
@@ -363,7 +355,7 @@ func (m *ChatModel) renderSidebarContent() string {
 		branch = strings.TrimSpace(string(output))
 	}
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Branch:"))
-	sb.WriteString(fmt.Sprintf("\n%s\n", branch))
+	sb.WriteString("\n" + branch + "\n")
 
 	return sb.String()
 }

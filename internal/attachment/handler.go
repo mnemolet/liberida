@@ -15,11 +15,11 @@ const (
 )
 
 var (
-	ErrFileNotFound    = errors.New("file not found")
-	ErrNotRegularFile  = errors.New("not a regular file")
-	ErrFileTooLarge    = errors.New("file exceeds maximum size limit")
-	ErrSymlinkLoop     = errors.New("symlink loop detected")
-	ErrSystemFile      = errors.New("system file access denied")
+	ErrFileNotFound   = errors.New("file not found")
+	ErrNotRegularFile = errors.New("not a regular file")
+	ErrFileTooLarge   = errors.New("file exceeds maximum size limit")
+	ErrSymlinkLoop    = errors.New("symlink loop detected")
+	ErrSystemFile     = errors.New("system file access denied")
 )
 
 var blockedUnixPrefixes = []string{
@@ -43,7 +43,7 @@ var blockedUnixPrefixes = []string{
 
 var (
 	windowsBlockedPrefixes []string
-	windowsBlockedOnce    bool
+	windowsBlockedOnce     bool
 )
 
 var blockedHomeDirs = []string{
@@ -179,42 +179,42 @@ func NewHandler() *Handler {
 	return &Handler{
 		maxFileSize: DefaultMaxFileSize,
 		allowedExts: map[string]bool{
-			".txt":  true,
-			".log":  true,
-			".json": true,
-			".yaml": true,
-			".yml":  true,
-			".md":   true,
-			".go":   true,
-			".mod":  true,
-			".sum":  true,
-			".py":   true,
-			".js":   true,
-			".ts":   true,
-			".jsx":  true,
-			".tsx":  true,
-			".java": true,
-			".c":    true,
-			".h":    true,
-			".cpp":  true,
-			".hpp":  true,
-			".rs":   true,
-			".rb":   true,
-			".php":  true,
-			".sh":   true,
-			".bash": true,
-			".zsh":  true,
-			".sql":  true,
-			".xml":  true,
-			".html": true,
-			".css":  true,
-			".scss": true,
-			".toml": true,
-			".ini":  true,
-			".cfg":  true,
-			".conf": true,
-			".env":  true,
-			".gitignore": true,
+			".txt":          true,
+			".log":          true,
+			".json":         true,
+			".yaml":         true,
+			".yml":          true,
+			".md":           true,
+			".go":           true,
+			".mod":          true,
+			".sum":          true,
+			".py":           true,
+			".js":           true,
+			".ts":           true,
+			".jsx":          true,
+			".tsx":          true,
+			".java":         true,
+			".c":            true,
+			".h":            true,
+			".cpp":          true,
+			".hpp":          true,
+			".rs":           true,
+			".rb":           true,
+			".php":          true,
+			".sh":           true,
+			".bash":         true,
+			".zsh":          true,
+			".sql":          true,
+			".xml":          true,
+			".html":         true,
+			".css":          true,
+			".scss":         true,
+			".toml":         true,
+			".ini":          true,
+			".cfg":          true,
+			".conf":         true,
+			".env":          true,
+			".gitignore":    true,
 			".dockerignore": true,
 		},
 	}
@@ -327,7 +327,7 @@ func (h *Handler) FormatComponents(components []ContextComponent) string {
 	sb.WriteString("================\n\n")
 
 	for _, c := range components {
-		sb.WriteString(fmt.Sprintf("=== %s ===\n", filepath.Base(c.Name)))
+		sb.WriteString("=== " + filepath.Base(c.Name) + " ===\n")
 		sb.WriteString(c.Content)
 		sb.WriteString("\n")
 	}
