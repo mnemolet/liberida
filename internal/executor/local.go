@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,10 +36,43 @@ func (l *LocalExecutor) resolvePath(relPath string) (string, error) {
 		return "", fmt.Errorf("absolute path not allowed")
 	}
 	full := filepath.Join(l.rootDir, clean)
+
+	// First line of defense: string-based prefix check.
+	// This catches naive ../ traversal before any symlink resolution.
 	if !strings.HasPrefix(full, l.rootDir+string(filepath.Separator)) && full != l.rootDir {
 		return "", fmt.Errorf("path escapes workspace")
 	}
-	return full, nil
+
+	// Second line of defense: resolve symlinks to prevent symlink-based escape.
+	// For non-existent files (e.g. WriteFile to a new path), resolve the parent.
+	resolved, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if parent, e2 := filepath.EvalSymlinks(filepath.Dir(full)); e2 == nil {
+				if !isWithinRoot(l.rootDir, parent) {
+					return "", fmt.Errorf("path escapes workspace via symlink")
+				}
+			}
+			return full, nil
+		}
+		return "", fmt.Errorf("path resolution error: %w", err)
+	}
+
+	if !isWithinRoot(l.rootDir, resolved) {
+		return "", fmt.Errorf("path escapes workspace via symlink")
+	}
+	return resolved, nil
+}
+
+// isWithinRoot checks whether resolvedPath is inside rootDir,
+// accounting for the possibility that rootDir itself is a symlink.
+func isWithinRoot(rootDir, resolvedPath string) bool {
+	rootResolved, err := filepath.EvalSymlinks(rootDir)
+	if err != nil {
+		rootResolved = rootDir
+	}
+	prefix := rootResolved + string(filepath.Separator)
+	return strings.HasPrefix(resolvedPath, prefix) || resolvedPath == rootResolved
 }
 
 func (l *LocalExecutor) WriteFile(path string, data []byte) error {
