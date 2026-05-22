@@ -1,8 +1,11 @@
 package executor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -344,4 +347,185 @@ func TestIsWithinRoot(t *testing.T) {
 			t.Error("expected false")
 		}
 	})
+}
+
+func TestDefaultBlocklist_BlocksDangerousCommands(t *testing.T) {
+	tests := []struct {
+		cmd string
+	}{
+		{"dd"}, {"mkfs"}, {"fdisk"}, {"parted"}, {"gdisk"},
+		{"shutdown"}, {"reboot"}, {"halt"}, {"poweroff"}, {"init"},
+		{"sudo"}, {"doas"}, {"su"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			exec := &LocalExecutor{
+				rootDir: t.TempDir(),
+				policy:  CommandPolicy{Blocklist: slices.Clone(DefaultBlocklist)},
+			}
+			_, err := exec.RunCommand(context.Background(), []string{tt.cmd})
+			if err == nil {
+				t.Fatal("expected error for blocked command")
+			}
+			if !strings.Contains(err.Error(), "is blocked") {
+				t.Errorf("expected 'is blocked' error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunCommand_Empty(t *testing.T) {
+	exec := &LocalExecutor{rootDir: t.TempDir()}
+	_, err := exec.RunCommand(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for empty command")
+	}
+}
+
+func TestRunCommand_AllowedCommandSucceeds(t *testing.T) {
+	exec := &LocalExecutor{rootDir: t.TempDir()}
+	out, err := exec.RunCommand(context.Background(), []string{"echo", "hello"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "hello") {
+		t.Errorf("expected output containing 'hello', got %q", out)
+	}
+}
+
+func TestRunCommand_WithPathPrefix(t *testing.T) {
+	exec := &LocalExecutor{
+		rootDir: t.TempDir(),
+		policy:  CommandPolicy{Blocklist: []string{"rm"}},
+	}
+	_, err := exec.RunCommand(context.Background(), []string{"/usr/bin/rm", "file"})
+	if err == nil {
+		t.Fatal("expected error: /usr/bin/rm should match 'rm' in blocklist")
+	}
+	if !strings.Contains(err.Error(), "is blocked") {
+		t.Errorf("expected 'is blocked' error, got: %v", err)
+	}
+}
+
+func TestRunCommand_AllowlistEnforced(t *testing.T) {
+	exec := &LocalExecutor{
+		rootDir: t.TempDir(),
+		policy:  CommandPolicy{Allowlist: []string{"ls"}},
+	}
+	_, err := exec.RunCommand(context.Background(), []string{"echo", "test"})
+	if err == nil {
+		t.Fatal("expected error: echo is not in allowlist")
+	}
+	if !strings.Contains(err.Error(), "not in the allowlist") {
+		t.Errorf("expected 'not in the allowlist' error, got: %v", err)
+	}
+}
+
+func TestRunCommand_AllowlistHonored(t *testing.T) {
+	exec := &LocalExecutor{
+		rootDir: t.TempDir(),
+		policy:  CommandPolicy{Allowlist: []string{"echo"}},
+	}
+	out, err := exec.RunCommand(context.Background(), []string{"echo", "allowed"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "allowed") {
+		t.Errorf("expected output containing 'allowed', got %q", out)
+	}
+}
+
+func TestRunCommand_BlocklistOverridesAllowlist(t *testing.T) {
+	exec := &LocalExecutor{
+		rootDir: t.TempDir(),
+		policy: CommandPolicy{
+			Allowlist: []string{"sudo", "echo"},
+			Blocklist: []string{"sudo"},
+		},
+	}
+	// sudo is in both allowlist and blocklist — blocklist wins
+	_, err := exec.RunCommand(context.Background(), []string{"sudo", "whoami"})
+	if err == nil {
+		t.Fatal("expected error: sudo is in blocklist despite being in allowlist")
+	}
+	// echo is only in allowlist — allowed
+	out, err := exec.RunCommand(context.Background(), []string{"echo", "ok"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "ok") {
+		t.Errorf("expected output containing 'ok', got %q", out)
+	}
+}
+
+func TestSetPolicy(t *testing.T) {
+	exec := &LocalExecutor{rootDir: t.TempDir()}
+
+	exec.SetPolicy(CommandPolicy{
+		Allowlist: []string{"ls", "echo", "cat"},
+		Blocklist: []string{"rm", "cat"},
+	})
+
+	// rm is not in allowlist → blocked by allowlist
+	_, err := exec.RunCommand(context.Background(), []string{"rm", "file"})
+	if err == nil {
+		t.Fatal("expected error: rm is not in allowlist")
+	}
+	if !strings.Contains(err.Error(), "not in the allowlist") {
+		t.Errorf("expected 'not in the allowlist' error, got: %v", err)
+	}
+
+	// cat is in allowlist but also in blocklist → blocklist wins
+	_, err = exec.RunCommand(context.Background(), []string{"cat", "file"})
+	if err == nil {
+		t.Fatal("expected error: cat should be blocked")
+	}
+	if !strings.Contains(err.Error(), "is blocked") {
+		t.Errorf("expected 'is blocked' error, got: %v", err)
+	}
+
+	// echo is in allowlist and not in blocklist → allowed
+	out, err := exec.RunCommand(context.Background(), []string{"echo", "ok"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "ok") {
+		t.Errorf("expected output containing 'ok', got %q", out)
+	}
+}
+
+func TestSetPolicy_NilFieldsLeftUnchanged(t *testing.T) {
+	exec := &LocalExecutor{
+		rootDir: t.TempDir(),
+		policy: CommandPolicy{
+			Allowlist: []string{"echo", "rm"},
+			Blocklist: []string{"rm"},
+		},
+	}
+
+	// Only update allowlist, blocklist should stay (rm still blocked)
+	exec.SetPolicy(CommandPolicy{
+		Allowlist: []string{"echo", "rm"},
+	})
+
+	// rm is in both allowlist and blocklist → blocklist wins
+	_, err := exec.RunCommand(context.Background(), []string{"rm", "file"})
+	if err == nil {
+		t.Fatal("expected error: rm should still be blocked")
+	}
+	if !strings.Contains(err.Error(), "is blocked") {
+		t.Errorf("expected 'is blocked' error, got: %v", err)
+	}
+}
+
+func TestRunCommand_CancelledContext(t *testing.T) {
+	exec := &LocalExecutor{rootDir: t.TempDir()}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := exec.RunCommand(ctx, []string{"sleep", "10"})
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
 }

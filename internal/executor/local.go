@@ -8,11 +8,38 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
+// DefaultBlocklist contains dangerous system commands blocked by default.
+var DefaultBlocklist = []string{
+	"dd",
+	"mkfs",
+	"fdisk",
+	"parted",
+	"gdisk",
+	"shutdown",
+	"reboot",
+	"halt",
+	"poweroff",
+	"init",
+	"sudo",
+	"doas",
+	"su",
+}
+
+// CommandPolicy defines allow/block rules for command execution.
+// If Allowlist is non-empty, only commands in it may run.
+// Blocklist always overrides Allowlist.
+type CommandPolicy struct {
+	Allowlist []string
+	Blocklist []string
+}
+
 type LocalExecutor struct {
 	rootDir string
+	policy  CommandPolicy
 }
 
 func NewLocal(rootDir string) (*LocalExecutor, error) {
@@ -23,7 +50,12 @@ func NewLocal(rootDir string) (*LocalExecutor, error) {
 	if err := os.MkdirAll(abs, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create sandbox directory: %w", err)
 	}
-	return &LocalExecutor{rootDir: abs}, nil
+	return &LocalExecutor{
+		rootDir: abs,
+		policy: CommandPolicy{
+			Blocklist: slices.Clone(DefaultBlocklist),
+		},
+	}, nil
 }
 
 // resolvePath ensures the path is inside the sandbox and returns absolute path.
@@ -128,16 +160,44 @@ func (l *LocalExecutor) RunCommand(ctx context.Context, command []string) (strin
 		return "", fmt.Errorf("empty command")
 	}
 
-	// Create the command
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	cmd.Dir = l.rootDir // Run in workspace directory
+	bin := filepath.Base(command[0])
 
-	// Run and get output
+	if err := l.checkCommandPolicy(bin); err != nil {
+		return "", err
+	}
+
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.Dir = l.rootDir
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(output), fmt.Errorf("command failed: %w", err)
 	}
 	return string(output), nil
+}
+
+// checkCommandPolicy enforces the allowlist/blocklist for a command binary name.
+func (l *LocalExecutor) checkCommandPolicy(bin string) error {
+	if len(l.policy.Allowlist) > 0 {
+		if !slices.Contains(l.policy.Allowlist, bin) {
+			return fmt.Errorf("command %q is not in the allowlist", bin)
+		}
+	}
+	if slices.Contains(l.policy.Blocklist, bin) {
+		return fmt.Errorf("command %q is blocked", bin)
+	}
+	return nil
+}
+
+// SetPolicy replaces the current command policy.
+// Passing nil fields preserves existing values.
+func (l *LocalExecutor) SetPolicy(p CommandPolicy) {
+	if p.Allowlist != nil {
+		l.policy.Allowlist = slices.Clone(p.Allowlist)
+	}
+	if p.Blocklist != nil {
+		l.policy.Blocklist = slices.Clone(p.Blocklist)
+	}
 }
 
 func (l *LocalExecutor) Close() error {
