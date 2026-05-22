@@ -337,6 +337,8 @@ func (m *ChatModel) renderSidebarContent() string {
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Cost:"))
 	sb.WriteString(fmt.Sprintf("\n$%.6f", m.lastUsage.EstimatedCost))
 
+	sb.WriteString(fmt.Sprint("\n\n")) // add whitespace
+
 	// Environment Workspace Stats (Directory & Git Branch)
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Underline(true).Render("Workspace"))
 	sb.WriteString("\n\n")
