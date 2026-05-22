@@ -349,7 +349,7 @@ func TestIsWithinRoot(t *testing.T) {
 	})
 }
 
-func TestDefaultBlocklist_BlocksDangerousCommands(t *testing.T) {
+func TestDefaultBlocklistBlocksDangerousCommands(t *testing.T) {
 	tests := []struct {
 		cmd string
 	}{
@@ -362,7 +362,7 @@ func TestDefaultBlocklist_BlocksDangerousCommands(t *testing.T) {
 		t.Run(tt.cmd, func(t *testing.T) {
 			exec := &LocalExecutor{
 				rootDir: t.TempDir(),
-				policy:  CommandPolicy{Blocklist: slices.Clone(DefaultBlocklist)},
+				policy:  CommandPolicy{Blocklist: slices.Clone(defaultBlocklist)},
 			}
 			_, err := exec.RunCommand(context.Background(), []string{tt.cmd})
 			if err == nil {
@@ -492,6 +492,241 @@ func TestSetPolicy(t *testing.T) {
 	}
 	if !strings.Contains(out, "ok") {
 		t.Errorf("expected output containing 'ok', got %q", out)
+	}
+}
+
+func TestNewLocalInitializesFileBlocklist(t *testing.T) {
+	exec, err := NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocal failed: %v", err)
+	}
+	if len(exec.filePolicy.Blocklist) == 0 {
+		t.Fatal("expected file blocklist to be initialized")
+	}
+}
+
+func TestCheckFilePolicy(t *testing.T) {
+	tmp := t.TempDir()
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{name: "blocked .env file", path: ".env", wantErr: true},
+		{name: "blocked .env.prod", path: ".env.production", wantErr: true},
+		{name: "blocked .env.local", path: ".env.local", wantErr: true},
+		{name: "blocked pem file", path: "cert.pem", wantErr: true},
+		{name: "blocked key file", path: "private.key", wantErr: true},
+		{name: "blocked id_rsa", path: "id_rsa", wantErr: true},
+		{name: "blocked id_ed25519", path: "id_ed25519", wantErr: true},
+		{name: "blocked id_ecdsa", path: "id_ecdsa", wantErr: true},
+		{name: "blocked .ssh file", path: ".ssh/authorized_keys", wantErr: true},
+		{name: "blocked .netrc", path: ".netrc", wantErr: true},
+		{name: "blocked .git-credentials", path: ".git-credentials", wantErr: true},
+		{name: "blocked key in subdir", path: "config/keys/secret.pem", wantErr: true},
+		{name: "blocked .env in subdir", path: "project/.env", wantErr: true},
+		{name: "blocked .ssh nested deep", path: "config/infra/.ssh/authorized_keys", wantErr: true},
+		{name: "blocked .gnupg nested", path: "users/alice/.gnupg/pubring.kbx", wantErr: true},
+		{name: "blocked id_rsa nested", path: "backup/ssh/id_rsa.old", wantErr: true},
+		{name: "allowed regular file", path: "main.go", wantErr: false},
+		{name: "allowed .txt", path: "notes.txt", wantErr: false},
+		{name: "allowed nested file", path: "src/main.go", wantErr: false},
+	}
+
+	exec := &LocalExecutor{
+		rootDir: tmp,
+		filePolicy: FilePolicy{
+			Blocklist: slices.Clone(defaultFileBlocklist),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			absPath := filepath.Join(tmp, tt.path)
+			err := exec.checkFilePolicy(absPath)
+			if tt.wantErr && err == nil {
+				t.Errorf("expected error for path %q", tt.path)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error for path %q: %v", tt.path, err)
+			}
+		})
+	}
+}
+
+func TestWriteFile_BlockedPaths(t *testing.T) {
+	tmp := t.TempDir()
+	exec, err := NewLocal(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockedPaths := []string{
+		".env",
+		".env.production",
+		"config/keys/cert.pem",
+		".ssh/id_rsa.pub",
+		"config/infra/.ssh/authorized_keys",
+		"id_ed25519",
+		".netrc",
+		".git-credentials",
+	}
+
+	for _, p := range blockedPaths {
+		t.Run(p, func(t *testing.T) {
+			err := exec.WriteFile(p, []byte("content"))
+			if err == nil {
+				t.Fatal("expected error for blocked path")
+			}
+			if !strings.Contains(err.Error(), "matches blocked pattern") {
+				t.Errorf("expected 'matches blocked pattern' error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestWriteFile_AllowedPaths(t *testing.T) {
+	tmp := t.TempDir()
+	exec, err := NewLocal(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	allowedPaths := []string{
+		"main.go",
+		"src/app.go",
+		"README.md",
+		"config/settings.json",
+		"scripts/build.sh",
+	}
+
+	for _, p := range allowedPaths {
+		t.Run(p, func(t *testing.T) {
+			err := exec.WriteFile(p, []byte("content"))
+			if err != nil {
+				t.Fatalf("unexpected error for path %q: %v", p, err)
+			}
+		})
+	}
+}
+
+func TestReadFile_BlockedPath(t *testing.T) {
+	tmp := t.TempDir()
+	exec, err := NewLocal(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = exec.ReadFile(".env")
+	if err == nil {
+		t.Fatal("expected error for blocked path")
+	}
+	if !strings.Contains(err.Error(), "matches blocked pattern") {
+		t.Errorf("expected 'matches blocked pattern' error, got: %v", err)
+	}
+}
+
+func TestDeleteFile_BlockedPath(t *testing.T) {
+	tmp := t.TempDir()
+	exec, err := NewLocal(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = exec.DeleteFile(".env")
+	if err == nil {
+		t.Fatal("expected error for blocked path")
+	}
+	if !strings.Contains(err.Error(), "matches blocked pattern") {
+		t.Errorf("expected 'matches blocked pattern' error, got: %v", err)
+	}
+}
+
+func TestSetFilePolicy(t *testing.T) {
+	tmp := t.TempDir()
+	exec := &LocalExecutor{
+		rootDir: tmp,
+		filePolicy: FilePolicy{
+			Blocklist: []string{"*.env"},
+		},
+	}
+
+	// Replace blocklist entirely
+	exec.SetFilePolicy(FilePolicy{
+		Blocklist: []string{"*.pem"},
+	})
+
+	if err := exec.checkFilePolicy(filepath.Join(tmp, "secret.pem")); err == nil {
+		t.Fatal("expected .pem files to be blocked after policy update")
+	}
+	// Old blocklist is replaced, so .env should no longer be blocked
+	if err := exec.checkFilePolicy(filepath.Join(tmp, ".env")); err != nil {
+		t.Fatal("expected .env to not be blocked after blocklist replacement")
+	}
+}
+
+func TestWriteFile_TraversalBypassBlocked(t *testing.T) {
+	tmp := t.TempDir()
+	exec, err := NewLocal(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Traversal is caught by resolvePath before checkFilePolicy even runs
+	err = exec.WriteFile("subdir/../../.env", []byte("hacked"))
+	if err == nil {
+		t.Fatal("expected error for traversal path")
+	}
+	if !strings.Contains(err.Error(), "escapes") {
+		t.Errorf("expected sandbox escape error, got: %v", err)
+	}
+}
+
+func TestWriteFile_SymlinkToBlockedFile(t *testing.T) {
+	tmp := t.TempDir()
+	exec, err := NewLocal(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a .env file and a symlink pointing to it
+	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("secret"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "config"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../.env", filepath.Join(tmp, "config/link.env")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Writing through the symlink must be blocked:
+	// resolvePath resolves the symlink -> full path to .env
+	// checkFilePolicy then matches the resolved path against blocklist
+	err = exec.WriteFile("config/link.env", []byte("hacked"))
+	if err == nil {
+		t.Fatal("expected error for writing to .env through symlink")
+	}
+	if !strings.Contains(err.Error(), "matches blocked pattern") {
+		t.Errorf("expected 'matches blocked pattern' error, got: %v", err)
+	}
+}
+
+func TestSetFilePolicy_NilPreservesBlocklist(t *testing.T) {
+	tmp := t.TempDir()
+	exec := &LocalExecutor{
+		rootDir: tmp,
+		filePolicy: FilePolicy{
+			Blocklist: []string{"*.env"},
+		},
+	}
+
+	// Nil blocklist should preserve existing
+	exec.SetFilePolicy(FilePolicy{})
+
+	if err := exec.checkFilePolicy(filepath.Join(tmp, ".env")); err == nil {
+		t.Fatal("expected .env to remain blocked after nil update")
 	}
 }
 

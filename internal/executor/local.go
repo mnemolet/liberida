@@ -10,10 +10,24 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 )
 
-// DefaultBlocklist contains dangerous system commands blocked by default.
-var DefaultBlocklist = []string{
+// defaultFileBlocklist contains sensitive file path patterns blocked by default.
+// Patterns use filepath.Match syntax and are matched against paths relative to the workspace root.
+var defaultFileBlocklist = []string{
+	".env*",
+	"*.pem",
+	"*.key",
+	"id_*",
+	".ssh/*",
+	".gnupg/*",
+	".netrc",
+	".git-credentials",
+}
+
+// defaultBlocklist contains dangerous system commands blocked by default.
+var defaultBlocklist = []string{
 	"dd",
 	"mkfs",
 	"fdisk",
@@ -37,9 +51,17 @@ type CommandPolicy struct {
 	Blocklist []string
 }
 
+// FilePolicy defines block rules for file operations.
+// Blocklist entries are glob patterns matched against paths relative to the workspace root.
+type FilePolicy struct {
+	Blocklist []string
+}
+
 type LocalExecutor struct {
-	rootDir string
-	policy  CommandPolicy
+	mu         sync.RWMutex
+	rootDir    string
+	policy     CommandPolicy
+	filePolicy FilePolicy
 }
 
 func NewLocal(rootDir string) (*LocalExecutor, error) {
@@ -53,7 +75,10 @@ func NewLocal(rootDir string) (*LocalExecutor, error) {
 	return &LocalExecutor{
 		rootDir: abs,
 		policy: CommandPolicy{
-			Blocklist: slices.Clone(DefaultBlocklist),
+			Blocklist: slices.Clone(defaultBlocklist),
+		},
+		filePolicy: FilePolicy{
+			Blocklist: slices.Clone(defaultFileBlocklist),
 		},
 	}, nil
 }
@@ -107,9 +132,45 @@ func isWithinRoot(rootDir, resolvedPath string) bool {
 	return strings.HasPrefix(resolvedPath, prefix) || resolvedPath == rootResolved
 }
 
+// checkFilePolicy enforces the file blocklist for a given resolved absolute path.
+func (l *LocalExecutor) checkFilePolicy(absPath string) error {
+	rel, err := filepath.Rel(l.rootDir, absPath)
+	if err != nil {
+		return fmt.Errorf("failed to compute relative path: %w", err)
+	}
+	clean := filepath.ToSlash(rel)
+
+	l.mu.RLock()
+	blocklist := l.filePolicy.Blocklist
+	l.mu.RUnlock()
+
+	for _, pattern := range blocklist {
+		if matched, _ := filepath.Match(pattern, clean); matched {
+			return fmt.Errorf("file path %q matches blocked pattern %q", clean, pattern)
+		}
+
+		// Check each path suffix to catch directory-bound patterns
+		// at any nesting level, e.g. ".ssh/*" must match:
+		//   ".ssh/authorized_keys"                 (suffix starts at .ssh)
+		//   "config/infra/.ssh/authorized_keys"    (suffix starts at .ssh)
+		// while "*.pem" must still match "secret.pem" at any depth.
+		parts := strings.Split(clean, "/")
+		for i := 1; i < len(parts); i++ {
+			suffix := strings.Join(parts[i:], "/")
+			if matched, _ := filepath.Match(pattern, suffix); matched {
+				return fmt.Errorf("file path %q matches blocked pattern %q", clean, pattern)
+			}
+		}
+	}
+	return nil
+}
+
 func (l *LocalExecutor) WriteFile(path string, data []byte) error {
 	full, err := l.resolvePath(path)
 	if err != nil {
+		return err
+	}
+	if err := l.checkFilePolicy(full); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
@@ -123,12 +184,18 @@ func (l *LocalExecutor) ReadFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := l.checkFilePolicy(full); err != nil {
+		return nil, err
+	}
 	return os.ReadFile(full)
 }
 
 func (l *LocalExecutor) DeleteFile(path string) error {
 	full, err := l.resolvePath(path)
 	if err != nil {
+		return err
+	}
+	if err := l.checkFilePolicy(full); err != nil {
 		return err
 	}
 	return os.Remove(full)
@@ -178,12 +245,17 @@ func (l *LocalExecutor) RunCommand(ctx context.Context, command []string) (strin
 
 // checkCommandPolicy enforces the allowlist/blocklist for a command binary name.
 func (l *LocalExecutor) checkCommandPolicy(bin string) error {
-	if len(l.policy.Allowlist) > 0 {
-		if !slices.Contains(l.policy.Allowlist, bin) {
+	l.mu.RLock()
+	allowlist := l.policy.Allowlist
+	blocklist := l.policy.Blocklist
+	l.mu.RUnlock()
+
+	if len(allowlist) > 0 {
+		if !slices.Contains(allowlist, bin) {
 			return fmt.Errorf("command %q is not in the allowlist", bin)
 		}
 	}
-	if slices.Contains(l.policy.Blocklist, bin) {
+	if slices.Contains(blocklist, bin) {
 		return fmt.Errorf("command %q is blocked", bin)
 	}
 	return nil
@@ -192,11 +264,25 @@ func (l *LocalExecutor) checkCommandPolicy(bin string) error {
 // SetPolicy replaces the current command policy.
 // Passing nil fields preserves existing values.
 func (l *LocalExecutor) SetPolicy(p CommandPolicy) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if p.Allowlist != nil {
 		l.policy.Allowlist = slices.Clone(p.Allowlist)
 	}
 	if p.Blocklist != nil {
 		l.policy.Blocklist = slices.Clone(p.Blocklist)
+	}
+}
+
+// SetFilePolicy replaces the current file policy.
+// Passing a nil Blocklist preserves the existing value.
+func (l *LocalExecutor) SetFilePolicy(p FilePolicy) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if p.Blocklist != nil {
+		l.filePolicy.Blocklist = slices.Clone(p.Blocklist)
 	}
 }
 

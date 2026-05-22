@@ -42,6 +42,9 @@ type ChatModel struct {
 	titleGenerated bool
 	ready          bool
 	lastUsage      provider.Usage
+
+	toolCallDepth    int
+	maxToolCallDepth int
 }
 
 var (
@@ -66,7 +69,8 @@ var (
 )
 
 const (
-	sidebarWidth = 30
+	sidebarWidth            = 30
+	defaultMaxToolCallDepth = 25
 )
 
 type usageUpdateMsg provider.Usage
@@ -108,24 +112,25 @@ func NewChatModel(
 	}
 
 	return &ChatModel{
-		input:          input,
-		messages:       displayMessages,
-		sessionID:      sessionID,
-		cfg:            cfg,
-		prov:           prov,
-		dbManager:      dbManager,
-		exec:           exec,
-		ctx:            ctx,
-		cancel:         cancel,
-		waiting:        false,
-		prog:           nil,
-		fullResponse:   strings.Builder{},
-		messageHistory: history,
-		terminalWidth:  0,
-		terminalHeight: 0,
-		viewport:       viewport.New(0, 0),
-		titleGenerated: false,
-		ready:          false,
+		input:            input,
+		messages:         displayMessages,
+		sessionID:        sessionID,
+		cfg:              cfg,
+		prov:             prov,
+		dbManager:        dbManager,
+		exec:             exec,
+		ctx:              ctx,
+		cancel:           cancel,
+		waiting:          false,
+		prog:             nil,
+		fullResponse:     strings.Builder{},
+		messageHistory:   history,
+		terminalWidth:    0,
+		terminalHeight:   0,
+		viewport:         viewport.New(0, 0),
+		titleGenerated:   false,
+		ready:            false,
+		maxToolCallDepth: defaultMaxToolCallDepth,
 	}
 }
 
@@ -361,6 +366,17 @@ func (m *ChatModel) renderSidebarContent() string {
 }
 
 func (m *ChatModel) startAIResponse(userInput string) {
+	if strings.TrimSpace(userInput) != "" {
+		m.toolCallDepth = 0
+	} else {
+		m.toolCallDepth++
+	}
+	if m.toolCallDepth > m.maxToolCallDepth {
+		m.prog.Send(fmt.Errorf("tool call recursion depth exceeded (%d)", m.maxToolCallDepth))
+		m.waiting = false
+		return
+	}
+
 	// Save user message synchronously
 	if _, err := m.dbManager.AddMessage(m.sessionID, "user", userInput); err != nil {
 		m.prog.Send(fmt.Errorf("failed to save user message: %w", err))
