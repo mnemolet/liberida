@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -18,7 +19,66 @@ var (
 	ErrNotRegularFile  = errors.New("not a regular file")
 	ErrFileTooLarge    = errors.New("file exceeds maximum size limit")
 	ErrSymlinkLoop     = errors.New("symlink loop detected")
+	ErrSystemFile      = errors.New("system file access denied")
 )
+
+var blockedSystemPrefixes = []string{
+	"/etc/",
+	"/proc/",
+	"/sys/",
+	"/dev/",
+	"/boot/",
+	"/root/",
+	"/run/",
+	"/sbin/",
+	"/bin/",
+	"/lib/",
+	"/lib64/",
+	"/usr/",
+	"/var/",
+	"/opt/",
+	"/snap/",
+	"/lost+found",
+}
+
+var blockedHomeDirs = []string{
+	".ssh",
+	".gnupg",
+	".aws",
+	".gcloud",
+	".kube",
+	".docker",
+	".config/opencode",
+	".config/gcloud",
+	".password-store",
+	".gnome",
+}
+
+func isBlockedPath(absPath string) (bool, string) {
+	clean := filepath.Clean(absPath)
+
+	for _, prefix := range blockedSystemPrefixes {
+		if strings.HasPrefix(clean, prefix) || clean == prefix[:len(prefix)-1] {
+			if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+				return true, prefix[:len(prefix)-1]
+			}
+		}
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false, ""
+	}
+
+	for _, dir := range blockedHomeDirs {
+		blocked := filepath.Join(homeDir, dir)
+		if strings.HasPrefix(clean, blocked+string(filepath.Separator)) || clean == blocked {
+			return true, blocked
+		}
+	}
+
+	return false, ""
+}
 
 type ContextComponent struct {
 	Name    string
@@ -99,6 +159,10 @@ func (h *Handler) ValidateAndRead(path string) (*ContextComponent, error) {
 		return nil, fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
+	if blocked, match := isBlockedPath(absPath); blocked {
+		return nil, fmt.Errorf("%s: %w", match, ErrSystemFile)
+	}
+
 	info, err := os.Lstat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -112,6 +176,11 @@ func (h *Handler) ValidateAndRead(path string) (*ContextComponent, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, ErrSymlinkLoop)
 		}
+
+		if blocked, match := isBlockedPath(realPath); blocked {
+			return nil, fmt.Errorf("symlink target %s: %w", match, ErrSystemFile)
+		}
+
 		info, err = os.Stat(realPath)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, ErrSymlinkLoop)
