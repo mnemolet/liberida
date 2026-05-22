@@ -26,7 +26,9 @@ func NewOllamaProvider(url, model string) *OllamaProvider {
 		url:   url,
 		model: model,
 		BaseProvider: BaseProvider{
-			httpClient: &http.Client{},
+			httpClient: &http.Client{
+				Timeout: DefaultHTTPTimeout,
+			},
 		},
 	}
 }

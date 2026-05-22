@@ -6,6 +6,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
+)
+
+const DefaultHTTPTimeout = 30 * time.Second
+
+const (
+	scannerInitialBufSize = 64 * 1024  // 64KB initial
+	scannerMaxBufSize     = 1024 * 1024 // 1MB max line
 )
 
 type BaseProvider struct {
@@ -45,6 +53,7 @@ func GenericStream(
 		defer close(toolChan)
 
 		scanner := bufio.NewScanner(body)
+		scanner.Buffer(make([]byte, scannerInitialBufSize), scannerMaxBufSize)
 		var accumulatedTools []ToolCall
 		var lastUsage Usage
 
